@@ -10,10 +10,10 @@
             "pre_block_socket_index": "0I-socket0"
         },
         {
-            "angle": 118.13797760009766,
             "dir": 1,
             "radius": 53.44254684448242,
             "length": 72.50576782226562,
+            "angle": 118.13797760009766,
             "id": "C",
             "pre_block_socket_index": "1S-socket0"
         },
