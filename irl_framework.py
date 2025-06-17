@@ -1,8 +1,3 @@
-"""
-IRL Framework for iterative feedback experiments.
-Handles trajectory collection, IRL learning, and policy updates.
-"""
-
 import numpy as np
 import json
 import csv

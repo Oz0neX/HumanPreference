@@ -18,7 +18,7 @@ trajectory_preferences/
 ├── irl_framework.py           # IRL learning framework and experiment management
 ├── iterative_experiment.py    # Main experiment runner
 ├── test_naive_policies.py     # Test script for naive policies
-├── README_IRL_Experiment.md   # This file
+├── README.md   # This file
 ├── map_maker.py              # Creates preset maps (existing)
 ├── trajectory.py             # Original trajectory logging (existing)
 └── preset_maps/              # Directory for saved maps
