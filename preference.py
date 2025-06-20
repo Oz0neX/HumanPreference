@@ -106,16 +106,14 @@ class RobotTeachingApp:
         create_label(main_frame, "Robot Teaching", 24, bold=True)
         status_frame = Frame(main_frame, bg="#2F4F2F")
         status_frame.pack(fill=tk.X, pady=(0, 15))
-        self.phase_label = create_label(status_frame, "Phase: Ready to Start", 12, bold=True, side=tk.LEFT)
-        self.iteration_label = create_label(status_frame, f"Iteration: 0/{self.total_iterations}", 12, bold=True, side=tk.RIGHT)
 
         self.sim_frame = Frame(main_frame, bg="black", relief=tk.RAISED, borderwidth=3, width=900, height=450)
         self.sim_frame.pack(pady=(0, 15))
         self.sim_frame.pack_propagate(False)
-        self.sim_placeholder = create_label(self.sim_frame, "MetaDrive Simulation Area\n\nClick 'Start Experiment' to begin Part 1", 14)
+        
+        part_name = "TEACH the robot how to drive" if IS_TEACHING_EXPERIMENT else "perform a normal drive"
+        self.sim_placeholder = create_label(self.sim_frame, "Please"+part_name+".\n\nClick 'Start Experiment' to begin Part 1", 14)
         self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
-
-        self.instructions_label = create_label(main_frame, "Welcome! This experiment has 5 phases to teach a robot to drive.", 11)
 
         button_frame = Frame(main_frame, bg="#2F4F2F")
         button_frame.pack(pady=15)
@@ -148,7 +146,6 @@ class RobotTeachingApp:
         self.update_ui_state(is_running=True)
         policy_type = self.phase_sequence[0]
         self.run_demonstration(policy_type)
-        self.center_window()
 
     def next_phase(self):
         if self.current_trajectory:
@@ -173,9 +170,8 @@ class RobotTeachingApp:
             self.env = None
         self.part1_complete = True
         self.update_ui_state(is_running=False, part1_complete=True)
-        self.sim_placeholder.config(text="Part 1 Complete!\n\nClick 'Begin Part 2' to proceed")
-        part_name = "Teaching Phase" if IS_TEACHING_EXPERIMENT else "Optimal Demonstrations"
-        self.update_status("Part 1 Complete", self.part1_iterations, f"{part_name} finished. Ready for Part 2.")
+        part_name = "TEACH the robot how to drive" if not IS_TEACHING_EXPERIMENT else "perform a normal drive"
+        self.sim_placeholder.config(text="Now please "+part_name+".\n\n Click 'Begin Part 2'", font=("Arial", 18, "bold"))
 
     def continue_to_part2(self):
         self.current_part = 2
@@ -196,27 +192,19 @@ class RobotTeachingApp:
             self.env.close()
             self.env = None
         self.update_ui_state(is_running=False)
-        if completed:
-            self.update_status("Completed", self.total_iterations, "Thanks")
-        else:
-            self.sim_placeholder.config(text="MetaDrive Simulation Area\n\nClick 'Start Experiment' to begin")
-            self.update_status("Stopped", 0, "Simulation stopped.")
+        if not completed:
+            part_name = "perform a normal drive" if IS_TEACHING_EXPERIMENT else "teach the robot how to drive"
+            self.sim_placeholder.config(text="Please "+part_name+".\n\nClick 'Start Experiment' to begin")
 
     def complete_experiment(self):
         self.stop_simulation(completed=True)
 
     def run_demonstration(self, policy_type):
-        instructions = {
-            "noisy_expert": "Watch the robot's poor driving behavior.",
-            "human": "Your turn! Use WASD to drive and press ESC when done. (Recording trajectory...)",
-            "human_demo": "Your turn! Use WASD to drive and press ESC when done. (Recording trajectory...)",
-            "irl": f"Watch the robot attempt to drive (Learning Iteration {(self.current_iteration - 1) // 2 + 1})."
-        }
-        self.update_status(policy_type.replace('_', ' ').title(), self.current_iteration, instructions[policy_type])
-        
         self.current_trajectory = []
         self.timestep = 0
         self.current_policy_type = policy_type
+        self.recording_started = False
+        self.start_position = None
         
         if self.env: self.env.close()
         
@@ -237,13 +225,11 @@ class RobotTeachingApp:
             self.policy = NoisyExpertPolicy(self.env.agent)
         elif policy_type == "irl": 
             self.policy = NaiveIRLPolicy(self.env.agent)
-            if IS_TEACHING_EXPERIMENT:
-                self.policy.iteration = 0
-            else:
-                self.policy.iteration = 0
+            self.policy.iteration = 0
         else: 
             self.policy = None
         
+        self.root.after(100, self.center_window)
         self.simulation_loop()
 
     def simulation_loop(self):
@@ -253,35 +239,38 @@ class RobotTeachingApp:
             obs, reward, terminated, truncated, info = self.env.step(action)
             
             if self.current_policy_type in ["human", "human_demo"]:
-                step_data = {
-                    'timestep': self.timestep,
-                    'action_steering': action[0],
-                    'action_throttle': action[1],
-                    'reward': reward,
-                    'vehicle_x': self.env.agent.position[0],
-                    'vehicle_y': self.env.agent.position[1],
-                    'vehicle_heading': self.env.agent.heading_theta,
-                    'vehicle_speed': self.env.agent.speed,
-                    'policy_type': self.current_policy_type,
-                    'iteration': self.current_iteration,
-                }
+                current_position = np.array([self.env.agent.position[0], self.env.agent.position[1]])
                 
-                if info:
-                    for key in ['velocity', 'steering', 'acceleration', 'step_reward', 'crash', 'out_of_road', 'arrive_dest']:
-                        if key in info:
-                            step_data[f'info_{key}'] = info[key]
+                if self.start_position is None:
+                    self.start_position = current_position.copy()
                 
-                self.current_trajectory.append(step_data)
-            
-            self.timestep += 1
-            
-            render_text = {"Phase": self.phase_label.cget("text").split(": ")[1],
-                           "Iteration": f"{self.current_iteration}/{self.total_iterations}"}
-            
-            if self.current_policy_type in ["human", "human_demo"]:
-                render_text["Steps Recorded"] = str(len(self.current_trajectory))
-            
-            self.env.render(text=render_text)
+                if not self.recording_started:
+                    distance_from_start = np.linalg.norm(current_position - self.start_position)
+                    if distance_from_start >= 0.1:
+                        self.recording_started = True
+                        self.timestep = 1
+                
+                if self.recording_started:
+                    step_data = {
+                        'timestep': self.timestep,
+                        'action_steering': action[0],
+                        'action_throttle': action[1],
+                        'reward': reward,
+                        'vehicle_x': self.env.agent.position[0],
+                        'vehicle_y': self.env.agent.position[1],
+                        'vehicle_heading': self.env.agent.heading_theta,
+                        'vehicle_speed': self.env.agent.speed,
+                        'policy_type': self.current_policy_type,
+                        'iteration': self.current_iteration,
+                    }
+                    
+                    if info:
+                        for key in ['velocity', 'steering', 'acceleration', 'step_reward', 'crash', 'out_of_road', 'arrive_dest']:
+                            if key in info:
+                                step_data[f'info_{key}'] = info[key]
+                    
+                    self.current_trajectory.append(step_data)
+                    self.timestep += 1
             
             if terminated or truncated: 
                 self.root.after(500, self.next_phase)
@@ -305,11 +294,6 @@ class RobotTeachingApp:
         df.to_csv(filepath, index=False)
         self.trajectory_data.extend(self.current_trajectory)
         self.current_trajectory = []
-
-    def update_status(self, phase, iteration, instructions):
-        self.phase_label.config(text=f"Phase: {phase}")
-        self.iteration_label.config(text=f"Iteration: {iteration}/{self.total_iterations}")
-        self.instructions_label.config(text=instructions)
 
 if __name__ == "__main__": 
     root = tk.Tk()
