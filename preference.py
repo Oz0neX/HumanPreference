@@ -7,7 +7,7 @@ import os
 from metadrive.envs.metadrive_env import MetaDriveEnv
 from metadrive.examples.ppo_expert.numpy_expert import expert
 
-IS_TEACHING_EXPERIMENT = False
+IS_TEACHING_EXPERIMENT = True
 
 class NoisyExpertPolicy:
     def __init__(self, vehicle, steering_noise=0.3, throttle_noise=0.2, corruption_prob=0.15):
@@ -29,9 +29,9 @@ class NaiveIRLPolicy:
         self.vehicle = vehicle
         self.iteration = 0
         self.params_per_iteration = [
-            {"steer_range": 0.8, "throt_range": (0.1, 0.6)},
-            {"steer_range": 0.4, "throt_range": (0.2, 0.7)},
-            {"steer_range": 0.2, "throt_range": (0.5, 0.5)},
+            {"steer_range": 0.8, "throt_range": (0.9, 1)},
+            {"steer_range": 0.4, "throt_range": (0.9, 1)},
+            {"steer_range": 0.2, "throt_range": (0.9, 1)},
         ]
 
     def act(self):
@@ -196,6 +196,21 @@ class RobotTeachingApp:
             part_name = "perform a normal drive" if IS_TEACHING_EXPERIMENT else "teach the robot how to drive"
             self.sim_placeholder.config(text="Please "+part_name+".\n\nClick 'Start Experiment' to begin")
 
+    def get_key_states(self):
+        """Capture current key states using MetaDrive's native InputState"""
+        try:
+            controller = self.env.engine.get_policy(self.env.agent.id).controller
+            inputs = controller.inputs
+            
+            return {
+                'forward': int(inputs.isSet('forward')),
+                'left': int(inputs.isSet('turnLeft')),
+                'right': int(inputs.isSet('turnRight')),
+                'brake': int(inputs.isSet('reverse'))
+            }
+        except:
+            return {'forward': 0, 'left': 0, 'right': 0, 'brake': 0}
+
     def complete_experiment(self):
         self.stop_simulation(completed=True)
 
@@ -235,8 +250,15 @@ class RobotTeachingApp:
     def simulation_loop(self):
         if not self.running: return
         try:
-            action = self.policy.act() if self.policy else [0, 0]
-            obs, reward, terminated, truncated, info = self.env.step(action)
+            if self.current_policy_type in ["human", "human_demo"]:
+                obs, reward, terminated, truncated, info = self.env.step(None)
+                
+                steering = info.get('steering', 0.0) if info else 0.0
+                throttle = info.get('acceleration', 0.0) if info else 0.0
+                action = [steering, throttle]
+            else:
+                action = self.policy.act()
+                obs, reward, terminated, truncated, info = self.env.step(action)
             
             if self.current_policy_type in ["human", "human_demo"]:
                 current_position = np.array([self.env.agent.position[0], self.env.agent.position[1]])
@@ -251,23 +273,19 @@ class RobotTeachingApp:
                         self.timestep = 1
                 
                 if self.recording_started:
+                    key_states = self.get_key_states()
+                    
                     step_data = {
                         'timestep': self.timestep,
-                        'action_steering': action[0],
-                        'action_throttle': action[1],
-                        'reward': reward,
-                        'vehicle_x': self.env.agent.position[0],
-                        'vehicle_y': self.env.agent.position[1],
-                        'vehicle_heading': self.env.agent.heading_theta,
-                        'vehicle_speed': self.env.agent.speed,
-                        'policy_type': self.current_policy_type,
-                        'iteration': self.current_iteration,
+                        'forward': key_states['forward'],
+                        'left': key_states['left'],
+                        'right': key_states['right'],
+                        'brake': key_states['brake'],
+                        'vehicle_x': round(self.env.agent.position[0], 5),
+                        'vehicle_y': round(self.env.agent.position[1], 5),
+                        'vehicle_heading': round(self.env.agent.heading_theta, 5),
+                        'vehicle_speed': round(self.env.agent.speed, 5),
                     }
-                    
-                    if info:
-                        for key in ['velocity', 'steering', 'acceleration', 'step_reward', 'crash', 'out_of_road', 'arrive_dest']:
-                            if key in info:
-                                step_data[f'info_{key}'] = info[key]
                     
                     self.current_trajectory.append(step_data)
                     self.timestep += 1
