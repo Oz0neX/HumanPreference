@@ -29,33 +29,53 @@ class TrajectoryLoader:
         self.state_cols = ['vehicle_x', 'vehicle_y', 'vehicle_heading', 'vehicle_speed']
         self.action_cols = ['forward', 'left', 'right', 'brake']
 
-    def load_and_group_trajectories(self) -> Dict[str, List[Dict]]:
-        trajectories = {'optimal': [], 'teaching': []}
+    def load_map_based_trajectories(self) -> Dict[str, Dict[str, List[Dict]]]:
+        """Load trajectories organized by map seed"""
+        maps_data = {}
+        
         if not os.path.exists(self.data_dir):
             print(f"Data directory {self.data_dir} not found.")
-            return trajectories
+            return maps_data
         
-        # Load from both optimal_session_* and teaching_session_* folders
-        session_patterns = ["optimal_session_*", "teaching_session_*"]
-        for pattern in session_patterns:
-            session_paths = glob.glob(os.path.join(self.data_dir, pattern))
-            for session_path in session_paths:
-                session_name = os.path.basename(session_path)
-                print(f"Processing session: {session_name}")
-                for group in trajectories.keys():
-                    group_dir = os.path.join(session_path, group)
-                    if not os.path.exists(group_dir): continue
-                    for file_path in glob.glob(os.path.join(group_dir, "*.csv")):
-                        try:
-                            df = pd.read_csv(file_path)
-                            print(f"Loading {file_path}")
-                            trajectories[group].append({
-                                'states': df[self.state_cols].values,
-                                'actions': df[self.action_cols].values
-                            })
-                        except Exception as e:
-                            print(f"Error loading {file_path}: {e}")
-        return trajectories
+        # Load from map_* folders
+        map_paths = glob.glob(os.path.join(self.data_dir, "map_*"))
+        for map_path in map_paths:
+            map_name = os.path.basename(map_path)
+            print(f"Processing {map_name}")
+            
+            maps_data[map_name] = {'optimal': [], 'teaching': []}
+            
+            # Load optimal trajectories
+            optimal_dir = os.path.join(map_path, "optimal")
+            if os.path.exists(optimal_dir):
+                for file_path in glob.glob(os.path.join(optimal_dir, "*.csv")):
+                    try:
+                        df = pd.read_csv(file_path)
+                        print(f"Loading optimal trajectory: {file_path}")
+                        maps_data[map_name]['optimal'].append({
+                            'states': df[self.state_cols].values,
+                            'actions': df[self.action_cols].values,
+                            'file': os.path.basename(file_path)
+                        })
+                    except Exception as e:
+                        print(f"Error loading {file_path}: {e}")
+            
+            # Load teaching trajectories
+            teaching_dir = os.path.join(map_path, "teaching")
+            if os.path.exists(teaching_dir):
+                for file_path in glob.glob(os.path.join(teaching_dir, "*.csv")):
+                    try:
+                        df = pd.read_csv(file_path)
+                        print(f"Loading teaching trajectory: {file_path}")
+                        maps_data[map_name]['teaching'].append({
+                            'states': df[self.state_cols].values,
+                            'actions': df[self.action_cols].values,
+                            'file': os.path.basename(file_path)
+                        })
+                    except Exception as e:
+                        print(f"Error loading {file_path}: {e}")
+        
+        return maps_data
 
 class ImitationLearningModel(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, hidden_dims: List[int] = [128, 64]):
@@ -152,21 +172,40 @@ def train_model_on_trajectories(trajectories: List[Dict], model_name: str, times
     trainer.save_model(f"il_model_{model_name}_{timestamp}.pth")
 
 def main():
-    print("Start train")
+    print("=== Map-Based Imitation Learning Training ===")
     loader = TrajectoryLoader()
-    trajectory_matrix = loader.load_and_group_trajectories()
+    maps_data = loader.load_map_based_trajectories()
     
-    if not trajectory_matrix['optimal'] and not trajectory_matrix['teaching']:
+    if not maps_data:
         print("No trajectory data found.")
         return
-        
-    print(f"\nFound {len(trajectory_matrix['optimal'])} optimal and {len(trajectory_matrix['teaching'])} teaching trajectories.")
+    
+    # Print summary of loaded data
+    print(f"\n=== Trajectory Summary by Map ===")
+    for map_name, trajectories in maps_data.items():
+        optimal_count = len(trajectories['optimal'])
+        teaching_count = len(trajectories['teaching'])
+        print(f"{map_name}: {optimal_count} optimal, {teaching_count} teaching trajectories")
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    train_model_on_trajectories(trajectory_matrix['optimal'], "optimal", timestamp)
-    train_model_on_trajectories(trajectory_matrix['teaching'], "teaching", timestamp)
     
-    print(f"Saved models")
+    # Train models for each map separately
+    for map_name, trajectories in maps_data.items():
+        print(f"\n=== Training Models for {map_name} ===")
+        
+        # Train optimal model for this map
+        if trajectories['optimal']:
+            model_name = f"optimal_{map_name}"
+            train_model_on_trajectories(trajectories['optimal'], model_name, timestamp)
+        
+        # Train teaching model for this map
+        if trajectories['teaching']:
+            model_name = f"teaching_{map_name}"
+            train_model_on_trajectories(trajectories['teaching'], model_name, timestamp)
+    
+    print(f"\n=== Training Complete ===")
+    print(f"Models saved with timestamp: {timestamp}")
+    print(f"You can now compare optimal vs teaching models for each map separately")
 
 if __name__ == "__main__":
     main()

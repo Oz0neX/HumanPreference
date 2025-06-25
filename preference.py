@@ -72,16 +72,12 @@ class RobotTeachingApp:
         self.trajectory_data = []
         self.current_trajectory = []
         self.session_id = datetime.now().strftime("%m%d_%H%M")
-        
-        experiment_type = "teaching" if IS_TEACHING_EXPERIMENT else "optimal"
-        self.save_dir = os.path.join("trajectory_data", f"{experiment_type}_session_{self.session_id}")
-        os.makedirs(self.save_dir, exist_ok=True)
-        
-        self.teaching_dir = os.path.join(self.save_dir, "teaching")
-        self.optimal_dir = os.path.join(self.save_dir, "optimal")
-        os.makedirs(self.teaching_dir, exist_ok=True)
-        os.makedirs(self.optimal_dir, exist_ok=True)
         self.timestep = 0
+        
+        self.current_map_seed = None
+        self.map_dir = None
+        self.teaching_dir = None
+        self.optimal_dir = None
 
         self.setup_ui()
 
@@ -107,13 +103,18 @@ class RobotTeachingApp:
         status_frame = Frame(main_frame, bg="#2F4F2F")
         status_frame.pack(fill=tk.X, pady=(0, 15))
 
-        self.sim_frame = Frame(main_frame, bg="black", relief=tk.RAISED, borderwidth=3, width=900, height=450)
-        self.sim_frame.pack(pady=(0, 15))
+        # Create embedded container for MetaDrive window
+        self.sim_frame = Frame(main_frame, bg="#34495e", relief=tk.SUNKEN, borderwidth=3)
+        self.sim_frame.pack(pady=(0, 10), padx=20, fill=tk.X)
         self.sim_frame.pack_propagate(False)
         
         part_name = "TEACH the robot how to drive" if IS_TEACHING_EXPERIMENT else "perform a normal drive"
-        self.sim_placeholder = create_label(self.sim_frame, "Please"+part_name+".\n\nClick 'Start Experiment' to begin Part 1", 14)
+        self.sim_placeholder = create_label(self.sim_frame, "Please "+part_name+".\n\nClick 'Start Experiment' to begin Part 1", 14)
         self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        
+        # Add status text below the 3D environment
+        self.status_label = Label(main_frame, text="Ready to begin experiment", bg="#2F4F2F", fg="white", font=('Arial', 12))
+        self.status_label.pack(pady=(5, 0))
 
         button_frame = Frame(main_frame, bg="#2F4F2F")
         button_frame.pack(pady=15)
@@ -144,6 +145,7 @@ class RobotTeachingApp:
         self.running = True
         self.current_iteration = 1
         self.update_ui_state(is_running=True)
+        self.status_label.config(text="Starting experiment...")
         policy_type = self.phase_sequence[0]
         self.run_demonstration(policy_type)
 
@@ -156,7 +158,7 @@ class RobotTeachingApp:
             return
         
         if self.current_part == 2 and (self.current_iteration - self.part1_iterations) >= self.part2_iterations:
-            self.complete_experiment()
+            self.stop_simulation(completed=True)
             return
         
         self.current_iteration += 1
@@ -211,9 +213,6 @@ class RobotTeachingApp:
         except:
             return {'forward': 0, 'left': 0, 'right': 0, 'brake': 0}
 
-    def complete_experiment(self):
-        self.stop_simulation(completed=True)
-
     def run_demonstration(self, policy_type):
         self.current_trajectory = []
         self.timestep = 0
@@ -227,6 +226,15 @@ class RobotTeachingApp:
             seed = self.teaching_seed if self.current_iteration <= 4 else self.demo_seed
         else:
             seed = self.demo_seed if self.current_iteration <= 2 else self.teaching_seed
+        
+        if self.current_map_seed != seed:
+            self.current_map_seed = seed
+            self.map_dir = os.path.join("trajectory_data", f"map_{seed}")
+            self.teaching_dir = os.path.join(self.map_dir, "teaching")
+            self.optimal_dir = os.path.join(self.map_dir, "optimal")
+            
+            os.makedirs(self.teaching_dir, exist_ok=True)
+            os.makedirs(self.optimal_dir, exist_ok=True)
         
         is_manual = policy_type in ["human", "human_demo"]
         
@@ -302,7 +310,8 @@ class RobotTeachingApp:
             return
    
         df = pd.DataFrame(self.current_trajectory)
-        filename = f"human_trajectory_{self.current_iteration}.csv"
+        # Include session timestamp to make filenames unique across sessions
+        filename = f"trajectory_{self.current_iteration}_{self.session_id}.csv"
         
         if self.current_policy_type == "human_demo":
             filepath = os.path.join(self.optimal_dir, filename)
