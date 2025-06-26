@@ -43,7 +43,6 @@ class NaiveIRLPolicy:
 class RobotTeachingApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Robot Teaching")
         self.root.configure(bg="#2F4F2F")
         self.center_window()
 
@@ -99,11 +98,9 @@ class RobotTeachingApp:
             else: label.pack(pady=(0, 15))
             return label
 
-        create_label(main_frame, "Robot Teaching", 24, bold=True)
         status_frame = Frame(main_frame, bg="#2F4F2F")
         status_frame.pack(fill=tk.X, pady=(0, 15))
 
-        # Create embedded container for MetaDrive window
         self.sim_frame = Frame(main_frame, bg="#34495e", relief=tk.SUNKEN, borderwidth=3)
         self.sim_frame.pack(pady=(0, 10), padx=20, fill=tk.X)
         self.sim_frame.pack_propagate(False)
@@ -112,7 +109,6 @@ class RobotTeachingApp:
         self.sim_placeholder = create_label(self.sim_frame, "Please "+part_name+".\n\nClick 'Start Experiment' to begin Part 1", 14)
         self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
         
-        # Add status text below the 3D environment
         self.status_label = Label(main_frame, text="Ready to begin experiment", bg="#2F4F2F", fg="white", font=('Arial', 12))
         self.status_label.pack(pady=(5, 0))
 
