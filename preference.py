@@ -79,6 +79,9 @@ class RobotTeachingApp:
         self.optimal_dir = None
 
         self.setup_ui()
+        
+        # Start the Panda3D task manager loop
+        self.panda_step()
 
     def center_window(self):
         self.root.update_idletasks()
@@ -102,7 +105,7 @@ class RobotTeachingApp:
         status_frame.pack(fill=tk.X, pady=(0, 15))
 
         self.sim_frame = Frame(main_frame, bg="#34495e", relief=tk.SUNKEN, borderwidth=3)
-        self.sim_frame.pack(pady=(0, 10), padx=20, fill=tk.X)
+        self.sim_frame.pack(pady=(0, 10), padx=20, fill=tk.BOTH, expand=True)
         self.sim_frame.pack_propagate(False)
         
         part_name = "TEACH the robot how to drive" if IS_TEACHING_EXPERIMENT else "perform a normal drive"
@@ -129,13 +132,21 @@ class RobotTeachingApp:
             btn.pack(side=tk.LEFT, padx=8)
             self.buttons[name.lower()] = btn
 
+    def panda_step(self):
+        """Step the Panda3D task manager to keep rendering and simulation running"""
+        if self.env and self.env.engine:
+            self.env.engine.taskMgr.step()
+        self.root.after(10, self.panda_step)  # Schedule next step (~100 FPS)
+
     def update_ui_state(self, is_running, part1_complete=False):
         self.buttons["start"].config(state=tk.DISABLED if is_running else tk.NORMAL, bg="#CCCCCC" if is_running else "#4CAF50")
         self.buttons["next"].config(state=tk.NORMAL if is_running else tk.DISABLED, bg="#2196F3" if is_running else "#CCCCCC")
         self.buttons["continue"].config(state=tk.NORMAL if part1_complete else tk.DISABLED, bg="#FF9800" if part1_complete else "#CCCCCC")
         self.buttons["stop"].config(state=tk.NORMAL if is_running else tk.DISABLED, bg="#F44336" if is_running else "#CCCCCC")
-        if is_running: self.sim_placeholder.place_forget()
-        else: self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        if is_running: 
+            self.sim_placeholder.place_forget()
+        else: 
+            self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
     def start_experiment(self):
         self.running = True
@@ -216,7 +227,9 @@ class RobotTeachingApp:
         self.recording_started = False
         self.start_position = None
         
-        if self.env: self.env.close()
+        if self.env: 
+            self.env.close()
+            self.env = None
         
         if IS_TEACHING_EXPERIMENT:
             seed = self.teaching_seed if self.current_iteration <= 4 else self.demo_seed
@@ -234,9 +247,23 @@ class RobotTeachingApp:
         
         is_manual = policy_type in ["human", "human_demo"]
         
-        config = {"map": "SCS", "traffic_density": 0.1, "num_scenarios": 1, "start_seed": seed,
-                  "manual_control": is_manual, "use_render": True, "window_size": (900, 450),
-                  "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True}}
+        # Get the size of the simulation frame for embedding
+        self.root.update_idletasks()
+        frame_width = self.sim_frame.winfo_width() - 6  # Account for border
+        frame_height = self.sim_frame.winfo_height() - 6
+        
+        config = {
+            "map": "SCS", 
+            "traffic_density": 0.1, 
+            "num_scenarios": 1, 
+            "start_seed": seed,
+            "manual_control": is_manual, 
+            "use_render": True, 
+            "window_size": (frame_width, frame_height),
+            "parent_window": self.sim_frame.winfo_id(),  # Embed in the sim_frame
+            "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True}
+        }
+        
         self.env = MetaDriveEnv(config)
         obs = self.env.reset()[0]
 
@@ -248,11 +275,11 @@ class RobotTeachingApp:
         else: 
             self.policy = None
         
-        self.root.after(100, self.center_window)
         self.simulation_loop()
 
     def simulation_loop(self):
-        if not self.running: return
+        if not self.running: 
+            return
         try:
             if self.current_policy_type in ["human", "human_demo"]:
                 obs, reward, terminated, truncated, info = self.env.step(None)
@@ -299,6 +326,7 @@ class RobotTeachingApp:
             else: 
                 self.root.after(20, self.simulation_loop)
         except Exception as e:
+            print(f"Error in simulation loop: {e}")
             self.stop_simulation()
     
     def save_trajectory(self):
