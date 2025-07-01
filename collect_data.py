@@ -7,7 +7,7 @@ import os
 from metadrive.envs.metadrive_env import MetaDriveEnv
 from metadrive.examples.ppo_expert.numpy_expert import expert
 
-IS_TEACHING_EXPERIMENT = True
+IS_TEACHING_EXPERIMENT = False
 
 class NoisyExpertPolicy:
     def __init__(self, vehicle, steering_noise=0.3, throttle_noise=0.2, corruption_prob=0.15):
@@ -79,9 +79,6 @@ class RobotTeachingApp:
         self.optimal_dir = None
 
         self.setup_ui()
-        
-        # Start the Panda3D task manager loop
-        self.panda_step()
 
     def center_window(self):
         self.root.update_idletasks()
@@ -131,12 +128,6 @@ class RobotTeachingApp:
                          borderwidth=3, command=config["cmd"], state=config.get("state", tk.NORMAL))
             btn.pack(side=tk.LEFT, padx=8)
             self.buttons[name.lower()] = btn
-
-    def panda_step(self):
-        """Step the Panda3D task manager to keep rendering and simulation running"""
-        if self.env and self.env.engine:
-            self.env.engine.taskMgr.step()
-        self.root.after(10, self.panda_step)  # Schedule next step (~100 FPS)
 
     def update_ui_state(self, is_running, part1_complete=False):
         self.buttons["start"].config(state=tk.DISABLED if is_running else tk.NORMAL, bg="#CCCCCC" if is_running else "#4CAF50")
@@ -261,7 +252,8 @@ class RobotTeachingApp:
             "use_render": True, 
             "window_size": (frame_width, frame_height),
             "parent_window": self.sim_frame.winfo_id(),  # Embed in the sim_frame
-            "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True}
+            "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
+            "decision_repeat": 1
         }
         
         self.env = MetaDriveEnv(config)
@@ -277,19 +269,23 @@ class RobotTeachingApp:
         
         self.simulation_loop()
 
+    def custom_simulation(self, param):
+        self.env.engine.taskMgr.step()
+        return self.env.step(param)
+
     def simulation_loop(self):
         if not self.running: 
             return
         try:
             if self.current_policy_type in ["human", "human_demo"]:
-                obs, reward, terminated, truncated, info = self.env.step(None)
+                obs, reward, terminated, truncated, info = self.custom_simulation(None)
                 
                 steering = info.get('steering', 0.0) if info else 0.0
                 throttle = info.get('acceleration', 0.0) if info else 0.0
                 action = [steering, throttle]
             else:
                 action = self.policy.act()
-                obs, reward, terminated, truncated, info = self.env.step(action)
+                obs, reward, terminated, truncated, info = self.custom_simulation(action)
             
             if self.current_policy_type in ["human", "human_demo"]:
                 current_position = np.array([self.env.agent.position[0], self.env.agent.position[1]])
