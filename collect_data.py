@@ -7,7 +7,10 @@ import os
 from metadrive.envs.metadrive_env import MetaDriveEnv
 from metadrive.examples.ppo_expert.numpy_expert import expert
 
-IS_TEACHING_EXPERIMENT = False
+IS_TEACHING_EXPERIMENT = True
+
+main_color = '#3e3e42'
+secondary_color = '#252526'
 
 class NoisyExpertPolicy:
     def __init__(self, vehicle, steering_noise=0.3, throttle_noise=0.2, corruption_prob=0.15):
@@ -43,7 +46,7 @@ class NaiveIRLPolicy:
 class RobotTeachingApp:
     def __init__(self, root):
         self.root = root
-        self.root.configure(bg="#2F4F2F")
+        self.root.configure(bg=main_color)
         self.center_window()
 
         self.current_iteration = 0
@@ -88,20 +91,20 @@ class RobotTeachingApp:
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
     def setup_ui(self):
-        main_frame = Frame(self.root, bg="#2F4F2F")
+        main_frame = Frame(self.root, bg=main_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
 
         def create_label(parent, text, font_size, bold=False, side=None, fill=None):
             label = Label(parent, text=text, font=("Arial", font_size, "bold" if bold else "normal"),
-                          bg="#2F4F2F", fg="white", justify=tk.CENTER, wraplength=700)
+                          bg=main_color, fg="white", justify=tk.CENTER, wraplength=700)
             if side: label.pack(side=side, fill=fill)
             else: label.pack(pady=(0, 15))
             return label
 
-        status_frame = Frame(main_frame, bg="#2F4F2F")
+        status_frame = Frame(main_frame, bg=main_color)
         status_frame.pack(fill=tk.X, pady=(0, 15))
 
-        self.sim_frame = Frame(main_frame, bg="#34495e", relief=tk.SUNKEN, borderwidth=3)
+        self.sim_frame = Frame(main_frame, bg=secondary_color, relief=tk.SUNKEN, borderwidth=3)
         self.sim_frame.pack(pady=(0, 10), padx=20, fill=tk.BOTH, expand=True)
         self.sim_frame.pack_propagate(False)
         
@@ -109,10 +112,10 @@ class RobotTeachingApp:
         self.sim_placeholder = create_label(self.sim_frame, "Please "+part_name+".\n\nClick 'Start Experiment' to begin Part 1", 14)
         self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
         
-        self.status_label = Label(main_frame, text="Ready to begin experiment", bg="#2F4F2F", fg="white", font=('Arial', 12))
+        self.status_label = Label(main_frame, text="Ready to begin experiment", bg=main_color, fg="white", font=('Arial', 12))
         self.status_label.pack(pady=(5, 0))
 
-        button_frame = Frame(main_frame, bg="#2F4F2F")
+        button_frame = Frame(main_frame, bg=main_color)
         button_frame.pack(pady=15)
         self.buttons = {}
         btn_configs = {

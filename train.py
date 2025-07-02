@@ -58,16 +58,15 @@ def process(trajectories, model_name):
     all_states = np.vstack([traj['states'] for traj in trajectories])
     all_actions = np.vstack([traj['actions'] for traj in trajectories])
 
-    print("HARHAHRHHRHARHHRH HERE WE GO ALL STATES")
     print(all_states) # To visualize how they are being v_stacked and see if it's good for our imitation library
-    demos = types.TransitionMinimal(
+    demos = types.TransitionsMinimal(
         obs=all_states,
         acts=all_actions,
-        infos=np.array([{} for _ in range(batch_size)])
+        infos=np.array([{} for _ in range(len(all_states))])
     ) #Using a transitionminimal instead of transition
 
     bc_trainer = bc.BC(
-        observation_space=gym.spaces.Box(low=[-np.inf, -np.inf, -np.pi * 2, 0], high=[np.inf, np.inf, np.pi * 2, np.inf], shape=(4,), ),
+        observation_space=gym.spaces.Box(low=np.array([-np.inf, -np.inf, -np.pi * 2, 0]), high=np.array([np.inf, np.inf, np.pi * 2, np.inf]), shape=(4,), ),
         action_space=gym.spaces.MultiDiscrete([2, 2, 2, 2]),
         demonstrations=demos,
         rng=np.random.default_rng(0),
