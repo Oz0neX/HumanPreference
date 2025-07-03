@@ -237,38 +237,54 @@ class RobotTeachingApp:
         self.start_position = None
         self.current_policy_type = policy_type
         
-        if self.env: 
-            self.env.close()
-            self.env = None
+        # Determine if this is an optimal demonstration (human_demo)
+        is_optimal = policy_type == "human_demo"
         
-        if IS_TEACHING_EXPERIMENT:
-            seed = self.teaching_seed if self.current_iteration <= self.part1_iterations else self.demo_seed
+        # For optimal demonstrations, try to reuse environment with reset
+        # For teaching demonstrations, always close and recreate
+        if is_optimal and self.env is not None:
+            # Reset environment for optimal demonstrations
+            if IS_TEACHING_EXPERIMENT:
+                seed = self.demo_seed  # Optimal demos use demo_seed
+            else:
+                seed = self.demo_seed  # Optimal demos use demo_seed
+            
+            obs = self.env.reset(seed=seed)[0]
+            self.env.manual_control = True  # Optimal demos are always manual
         else:
-            seed = self.demo_seed if self.current_iteration <= self.part1_iterations else self.teaching_seed
-        
-        is_manual = policy_type in ["human", "human_demo"]
-        
-        # Get the size of the simulation frame for embedding
-        self.root.update_idletasks()
-        frame_width = self.sim_frame.winfo_width() - 6  # Account for border
-        frame_height = self.sim_frame.winfo_height() - 6
-        
-        config = {
-            "map": "SCS", 
-            "traffic_density": 0.1, 
-            "num_scenarios": 1, 
-            "start_seed": seed,
-            "manual_control": is_manual, 
-            "use_render": True, 
-            "window_size": (frame_width, frame_height),
-            "parent_window": self.sim_frame.winfo_id(),  # Embed in the sim_frame
-            "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
-            "on_continuous_line_done": False,  # Prevent termination when crossing continuous lines
-            "out_of_route_done": False,  # Prevent termination when going out of route
-        }
-        
-        self.env = MetaDriveEnv(config)
-        obs = self.env.reset()[0]
+            # Close and recreate environment for teaching demonstrations or first optimal demo
+            if self.env: 
+                self.env.close()
+                self.env = None
+            
+            if IS_TEACHING_EXPERIMENT:
+                seed = self.teaching_seed if self.current_iteration <= self.part1_iterations else self.demo_seed
+            else:
+                seed = self.demo_seed if self.current_iteration <= self.part1_iterations else self.teaching_seed
+            
+            is_manual = policy_type in ["human", "human_demo"]
+            
+            # Get the size of the simulation frame for embedding
+            self.root.update_idletasks()
+            frame_width = self.sim_frame.winfo_width() - 6  # Account for border
+            frame_height = self.sim_frame.winfo_height() - 6
+            
+            config = {
+                "map": "SCS", 
+                "traffic_density": 0.1, 
+                "num_scenarios": 1, 
+                "start_seed": seed,
+                "manual_control": is_manual, 
+                "use_render": True, 
+                "window_size": (frame_width, frame_height),
+                "parent_window": self.sim_frame.winfo_id(),  # Embed in the sim_frame
+                "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
+                "on_continuous_line_done": False,  # Prevent termination when crossing continuous lines
+                "out_of_route_done": False,  # Prevent termination when going out of route
+            }
+            
+            self.env = MetaDriveEnv(config)
+            obs = self.env.reset()[0]
 
         if policy_type == "noisy_expert": 
             self.policy = NoisyExpertPolicy(self.env.agent)
