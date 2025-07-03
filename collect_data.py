@@ -263,6 +263,8 @@ class RobotTeachingApp:
             "window_size": (frame_width, frame_height),
             "parent_window": self.sim_frame.winfo_id(),  # Embed in the sim_frame
             "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
+            "on_continuous_line_done": False,  # Prevent termination when crossing continuous lines
+            "out_of_route_done": False,  # Prevent termination when going out of route
         }
         
         self.env = MetaDriveEnv(config)
