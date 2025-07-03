@@ -11,6 +11,8 @@ from imitation.data import types
 from imitation.data import serialize
 
 IS_TEACHING_EXPERIMENT = True
+NUM_TEACHING = 2
+NUM_OPTIMAL = 3
 
 main_color = '#3e3e42'
 secondary_color = '#252526'
@@ -26,9 +28,9 @@ class NoisyExpertPolicy:
         try:
             # Instead of using expert, just return a simple turn action
             # This will make the agent turn left with some noise
-            base_action = np.array([-0.5, 1.0])  # Left turn, full throttle
+            base_action = np.array([0.5, 1.0])  # Left turn, full throttle
             noise = np.random.normal(0, [self.params["steering_noise"], self.params["throttle_noise"]])
-            return np.clip(base_action + noise, -1, 1)
+            return np.clip(base_action, -1, 1)
         except Exception:
             return np.random.uniform(-1, 1, size=2)
 
@@ -48,17 +50,35 @@ class RobotTeachingApp:
         self.part1_complete = False
         
         if IS_TEACHING_EXPERIMENT:
-            self.total_iterations = 6
-            self.phase_sequence = ["noisy_expert", "human", "noisy_expert", "human", "human_demo", "human_demo"]
-            self.part1_iterations = 4
-            self.part2_iterations = 2
+            # Generate teaching phase sequence: agent-human alternating for NUM_TEACHING cycles
+            teaching_sequence = []
+            for i in range(NUM_TEACHING):
+                teaching_sequence.extend(["noisy_expert", "human"])
+            
+            # Generate optimal phase sequence: human_demo for NUM_OPTIMAL times
+            optimal_sequence = ["human_demo"] * NUM_OPTIMAL
+            
+            # Combine: teaching first, then optimal
+            self.phase_sequence = teaching_sequence + optimal_sequence
+            self.total_iterations = len(self.phase_sequence)
+            self.part1_iterations = len(teaching_sequence)
+            self.part2_iterations = len(optimal_sequence)
             self.teaching_seed = 12345
             self.demo_seed = 54321
         else:
-            self.total_iterations = 6
-            self.phase_sequence = ["human_demo", "human_demo", "noisy_expert", "human", "noisy_expert", "human"]
-            self.part1_iterations = 2
-            self.part2_iterations = 4
+            # Generate optimal phase sequence: human_demo for NUM_OPTIMAL times
+            optimal_sequence = ["human_demo"] * NUM_OPTIMAL
+            
+            # Generate teaching phase sequence: agent-human alternating for NUM_TEACHING cycles
+            teaching_sequence = []
+            for i in range(NUM_TEACHING):
+                teaching_sequence.extend(["noisy_expert", "human"])
+            
+            # Combine: optimal first, then teaching
+            self.phase_sequence = optimal_sequence + teaching_sequence
+            self.total_iterations = len(self.phase_sequence)
+            self.part1_iterations = len(optimal_sequence)
+            self.part2_iterations = len(teaching_sequence)
             self.demo_seed = 12345
             self.teaching_seed = 54321
 
@@ -222,9 +242,9 @@ class RobotTeachingApp:
             self.env = None
         
         if IS_TEACHING_EXPERIMENT:
-            seed = self.teaching_seed if self.current_iteration <= 4 else self.demo_seed
+            seed = self.teaching_seed if self.current_iteration <= self.part1_iterations else self.demo_seed
         else:
-            seed = self.demo_seed if self.current_iteration <= 2 else self.teaching_seed
+            seed = self.demo_seed if self.current_iteration <= self.part1_iterations else self.teaching_seed
         
         is_manual = policy_type in ["human", "human_demo"]
         
