@@ -7,6 +7,9 @@ import os
 from metadrive.envs.metadrive_env import MetaDriveEnv
 from metadrive.examples.ppo_expert.numpy_expert import expert
 
+from imitation.data import types
+from imitation.data import serialize
+
 IS_TEACHING_EXPERIMENT = True
 
 main_color = '#3e3e42'
@@ -21,27 +24,15 @@ class NoisyExpertPolicy:
         if np.random.random() < self.params["corruption_prob"]:
             return np.random.uniform(-1, 1, size=2)
         try:
-            action = expert(self.vehicle, deterministic=True)
+            # Instead of using expert, just return a simple turn action
+            # This will make the agent turn left with some noise
+            base_action = np.array([-0.5, 1.0])  # Left turn, full throttle
             noise = np.random.normal(0, [self.params["steering_noise"], self.params["throttle_noise"]])
-            return np.clip(action + noise, -1, 1)
+            return np.clip(base_action + noise, -1, 1)
         except Exception:
             return np.random.uniform(-1, 1, size=2)
 
-class NaiveIRLPolicy:
-    def __init__(self, vehicle):
-        self.vehicle = vehicle
-        self.iteration = 0
-        self.params_per_iteration = [
-            {"steer_range": 0.8, "throt_range": (0.9, 1)},
-            {"steer_range": 0.4, "throt_range": (0.9, 1)},
-            {"steer_range": 0.2, "throt_range": (0.9, 1)},
-        ]
 
-    def act(self):
-        params = self.params_per_iteration[min(self.iteration, len(self.params_per_iteration) - 1)]
-        steering = np.random.uniform(-params["steer_range"], params["steer_range"])
-        throttle = np.random.uniform(*params["throt_range"])
-        return np.array([steering, throttle])
 
 class RobotTeachingApp:
     def __init__(self, root):
@@ -58,28 +49,29 @@ class RobotTeachingApp:
         
         if IS_TEACHING_EXPERIMENT:
             self.total_iterations = 6
-            self.phase_sequence = ["noisy_expert", "human", "irl", "human", "human_demo", "human_demo"]
+            self.phase_sequence = ["noisy_expert", "human", "noisy_expert", "human", "human_demo", "human_demo"]
             self.part1_iterations = 4
             self.part2_iterations = 2
             self.teaching_seed = 12345
             self.demo_seed = 54321
         else:
             self.total_iterations = 6
-            self.phase_sequence = ["human_demo", "human_demo", "noisy_expert", "human", "irl", "human"]
+            self.phase_sequence = ["human_demo", "human_demo", "noisy_expert", "human", "noisy_expert", "human"]
             self.part1_iterations = 2
             self.part2_iterations = 4
             self.demo_seed = 12345
             self.teaching_seed = 54321
 
-        self.trajectory_data = []
-        self.current_trajectory = []
-        self.session_id = datetime.now().strftime("%m%d_%H%M")
-        self.timestep = 0
+        # Trajectory recording variables for gym format
+        self.current_episode_obs = []
+        self.current_episode_acts = []
+        self.current_episode_infos = []
+        self.recording_started = False
+        self.start_position = None
+        self.trajectory_data_dir = "trajectory_data"
         
-        self.current_map_seed = None
-        self.map_dir = None
-        self.teaching_dir = None
-        self.optimal_dir = None
+        # Create trajectory data directory
+        os.makedirs(self.trajectory_data_dir, exist_ok=True)
 
         self.setup_ui()
 
@@ -151,7 +143,8 @@ class RobotTeachingApp:
         self.run_demonstration(policy_type)
 
     def next_phase(self):
-        if self.current_trajectory:
+        # Save trajectory if we have recorded data
+        if self.recording_started and len(self.current_episode_obs) > 0:
             self.save_trajectory()
         
         if self.current_part == 1 and self.current_iteration >= self.part1_iterations:
@@ -187,7 +180,8 @@ class RobotTeachingApp:
         self.run_demonstration(policy_type)
 
     def stop_simulation(self, completed=False):
-        if self.current_trajectory:
+        # Save any remaining trajectory data
+        if self.recording_started and len(self.current_episode_obs) > 0:
             self.save_trajectory()
             
         self.running = False
@@ -215,11 +209,13 @@ class RobotTeachingApp:
             return {'forward': 0, 'left': 0, 'right': 0, 'brake': 0}
 
     def run_demonstration(self, policy_type):
-        self.current_trajectory = []
-        self.timestep = 0
-        self.current_policy_type = policy_type
+        # Reset trajectory recording
+        self.current_episode_obs = []
+        self.current_episode_acts = []
+        self.current_episode_infos = []
         self.recording_started = False
         self.start_position = None
+        self.current_policy_type = policy_type
         
         if self.env: 
             self.env.close()
@@ -229,15 +225,6 @@ class RobotTeachingApp:
             seed = self.teaching_seed if self.current_iteration <= 4 else self.demo_seed
         else:
             seed = self.demo_seed if self.current_iteration <= 2 else self.teaching_seed
-        
-        if self.current_map_seed != seed:
-            self.current_map_seed = seed
-            self.map_dir = os.path.join("trajectory_data", f"map_{seed}")
-            self.teaching_dir = os.path.join(self.map_dir, "teaching")
-            self.optimal_dir = os.path.join(self.map_dir, "optimal")
-            
-            os.makedirs(self.teaching_dir, exist_ok=True)
-            os.makedirs(self.optimal_dir, exist_ok=True)
         
         is_manual = policy_type in ["human", "human_demo"]
         
@@ -256,7 +243,6 @@ class RobotTeachingApp:
             "window_size": (frame_width, frame_height),
             "parent_window": self.sim_frame.winfo_id(),  # Embed in the sim_frame
             "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
-            "decision_repeat": 1
         }
         
         self.env = MetaDriveEnv(config)
@@ -264,61 +250,63 @@ class RobotTeachingApp:
 
         if policy_type == "noisy_expert": 
             self.policy = NoisyExpertPolicy(self.env.agent)
-        elif policy_type == "irl": 
-            self.policy = NaiveIRLPolicy(self.env.agent)
-            self.policy.iteration = 0
         else: 
             self.policy = None
         
         self.simulation_loop()
-
-    def custom_simulation(self, param):
-        self.env.engine.taskMgr.step()
-        return self.env.step(param)
 
     def simulation_loop(self):
         if not self.running: 
             return
         try:
             if self.current_policy_type in ["human", "human_demo"]:
-                obs, reward, terminated, truncated, info = self.custom_simulation(None)
+                obs, reward, terminated, truncated, info = self.env.step([0, 0])
                 
                 steering = info.get('steering', 0.0) if info else 0.0
                 throttle = info.get('acceleration', 0.0) if info else 0.0
                 action = [steering, throttle]
             else:
                 action = self.policy.act()
-                obs, reward, terminated, truncated, info = self.custom_simulation(action)
+                print(f"Agent action: {action}")  # Debug: show agent actions
+                obs, reward, terminated, truncated, info = self.env.step(action)
             
             if self.current_policy_type in ["human", "human_demo"]:
-                current_position = np.array([self.env.agent.position[0], self.env.agent.position[1]])
-                
-                if self.start_position is None:
-                    self.start_position = current_position.copy()
-                
+                # Start recording once the vehicle moves
                 if not self.recording_started:
-                    distance_from_start = np.linalg.norm(current_position - self.start_position)
-                    if distance_from_start >= 0.1:
+                    current_position = np.array([self.env.agent.position[0], self.env.agent.position[1]])
+                    if self.start_position is None:
+                        self.start_position = current_position.copy()
+                    elif np.linalg.norm(current_position - self.start_position) >= 0.1:
                         self.recording_started = True
-                        self.timestep = 1
+                        print("Started recording trajectory.")
                 
+                # If recording, capture data in gym format
                 if self.recording_started:
+                    # Capture observation: vehicle position, heading, speed
+                    current_position = np.array([self.env.agent.position[0], self.env.agent.position[1]])
+                    current_heading = self.env.agent.heading_theta
+                    current_speed = self.env.agent.speed
+                    
+                    # Observation: vehicle_x, vehicle_y, vehicle_heading, vehicle_speed
+                    current_obs = np.array([
+                        round(current_position[0], 5),
+                        round(current_position[1], 5),
+                        round(current_heading, 5),
+                        round(current_speed, 5)
+                    ], dtype=np.float32)
+                    
+                    # Capture action: key states
                     key_states = self.get_key_states()
+                    current_act = np.array([
+                        key_states['forward'],
+                        key_states['left'],
+                        key_states['right'],
+                        key_states['brake']
+                    ], dtype=np.int64)
                     
-                    step_data = {
-                        'timestep': self.timestep,
-                        'forward': key_states['forward'],
-                        'left': key_states['left'],
-                        'right': key_states['right'],
-                        'brake': key_states['brake'],
-                        'vehicle_x': round(self.env.agent.position[0], 5),
-                        'vehicle_y': round(self.env.agent.position[1], 5),
-                        'vehicle_heading': round(self.env.agent.heading_theta, 5),
-                        'vehicle_speed': round(self.env.agent.speed, 5),
-                    }
-                    
-                    self.current_trajectory.append(step_data)
-                    self.timestep += 1
+                    self.current_episode_obs.append(current_obs)
+                    self.current_episode_acts.append(current_act)
+                    self.current_episode_infos.append({})
             
             if terminated or truncated: 
                 self.root.after(500, self.next_phase)
@@ -329,21 +317,55 @@ class RobotTeachingApp:
             self.stop_simulation()
     
     def save_trajectory(self):
-        if not self.current_trajectory or self.current_policy_type not in ["human", "human_demo"]:
+        """Save the current trajectory using imitation library format"""
+        if len(self.current_episode_obs) == 0:
             return
-   
-        df = pd.DataFrame(self.current_trajectory)
-        # Include session timestamp to make filenames unique across sessions
-        filename = f"trajectory_{self.current_iteration}_{self.session_id}.csv"
-        
-        if self.current_policy_type == "human_demo":
-            filepath = os.path.join(self.optimal_dir, filename)
-        else:
-            filepath = os.path.join(self.teaching_dir, filename)
-        
-        df.to_csv(filepath, index=False)
-        self.trajectory_data.extend(self.current_trajectory)
-        self.current_trajectory = []
+            
+        try:
+            # Remove the final action to match imitation library expectations
+            # (one more observation than actions)
+            if len(self.current_episode_acts) > 0:
+                actions = np.array(self.current_episode_acts[:-1])  # Remove last action
+                infos = np.array(self.current_episode_infos[:-1])   # Remove last info to match actions
+            else:
+                actions = np.array([])
+                infos = np.array([])
+                
+            # Create Trajectory object
+            trajectory = types.Trajectory(
+                obs=np.array(self.current_episode_obs),
+                acts=actions,
+                infos=infos,
+                terminal=True
+            )
+            
+            # Determine save path based on policy type and map seed
+            if self.current_policy_type == "human_demo":
+                demo_type = "optimal"
+            else:
+                demo_type = "teaching"
+            
+            # Get the current map seed
+            if IS_TEACHING_EXPERIMENT:
+                map_seed = self.teaching_seed if self.current_iteration <= 4 else self.demo_seed
+            else:
+                map_seed = self.demo_seed if self.current_iteration <= 2 else self.teaching_seed
+            
+            # Create directory structure: trajectory_data/map_XXXXX/demo_type/
+            save_dir = os.path.join(self.trajectory_data_dir, f"map_{map_seed}", demo_type)
+            os.makedirs(save_dir, exist_ok=True)
+            
+            # Create timestamp for unique filename
+            timestamp = datetime.now().strftime("%m%d_%H%M_%S")
+            save_path = os.path.join(save_dir, f"trajectory_{timestamp}")
+            
+            # Save trajectory using imitation library
+            serialize.save(save_path, [trajectory])
+            
+            print(f"Saved {demo_type} trajectory with {len(self.current_episode_obs)} steps to {save_path}")
+            
+        except Exception as e:
+            print(f"Error saving trajectory: {e}")
 
 if __name__ == "__main__": 
     root = tk.Tk()
