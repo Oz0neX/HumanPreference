@@ -10,7 +10,7 @@ from metadrive.examples.ppo_expert.numpy_expert import expert
 from imitation.data import types
 from imitation.data import serialize
 
-IS_TEACHING_EXPERIMENT = True
+IS_TEACHING_EXPERIMENT = False
 NUM_TEACHING = 2
 NUM_OPTIMAL = 3
 
@@ -281,6 +281,8 @@ class RobotTeachingApp:
                 "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
                 "on_continuous_line_done": False,  # Prevent termination when crossing continuous lines
                 "out_of_route_done": False,  # Prevent termination when going out of route
+                "crash_vehicle_done": False,  # Enable termination when crashing with other vehicles
+                "crash_object_done": False,  # Enable termination when crashing with objects
             }
             
             self.env = MetaDriveEnv(config)
