@@ -8,6 +8,7 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
 
 maps_data = extract_data()
 
@@ -49,7 +50,7 @@ def train(transitions, seed):
     
     obs = env.reset()[0]
     action_distributions = []
-    action_grid = torch.linspace(-1, 1, 21)
+    action_grid = torch.linspace(-1, 1, 100)
     
     for _ in range(1000):
         obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
@@ -79,12 +80,9 @@ def train(transitions, seed):
 
             steering_probs = F.softmax(steering_logits, dim=0).numpy()
             throttle_probs = F.softmax(throttle_logits, dim=0).numpy()
-            print(steering_probs)
             
             action_distributions.append({
-                'steering_grid': action_grid.numpy(),
                 'steering_probs': steering_probs,
-                'throttle_grid': action_grid.numpy(), 
                 'throttle_probs': throttle_probs
             })
             
@@ -115,6 +113,12 @@ def train(transitions, seed):
     steering_heatmap = np.array([dist['steering_probs'] for dist in action_distributions[:timesteps_to_show]])
     throttle_heatmap = np.array([dist['throttle_probs'] for dist in action_distributions[:timesteps_to_show]])
     
+    steering_scaler = MinMaxScaler(feature_range=(-1, 1))
+    throttle_scaler = MinMaxScaler(feature_range=(-1, 1))
+    
+    steering_heatmap = steering_scaler.fit_transform(steering_heatmap.flatten().reshape(-1, 1)).reshape(steering_heatmap.shape)
+    throttle_heatmap = throttle_scaler.fit_transform(throttle_heatmap.flatten().reshape(-1, 1)).reshape(throttle_heatmap.shape)
+    
     plt.figure(figsize=(18, 6))
     
     plt.subplot(1, 3, 1)
@@ -128,18 +132,20 @@ def train(transitions, seed):
     plt.grid(True)
     
     plt.subplot(1, 3, 2)
-    plt.imshow(steering_heatmap, cmap='coolwarm', aspect='auto', vmin=-0.5, vmax=0.5)
+    plt.imshow(steering_heatmap, cmap='coolwarm', aspect='auto', vmin=-1, vmax=1, origin='lower')
     plt.colorbar(label='Probability')
     plt.title('Steering Probability Heatmap')
-    plt.xlabel('Timestep')
-    plt.ylabel('Action Value Index')
+    plt.xlabel('(Left) <- Steering Direction -> (Right)')
+    plt.ylabel('Timestep')
+    plt.xticks([0, 25, 50, 75, 99], ['-1', '-0.5', '0', '0.5', '1'])
     
     plt.subplot(1, 3, 3)
-    plt.imshow(throttle_heatmap, cmap='coolwarm', aspect='auto', vmin=0, vmax=1)
+    plt.imshow(throttle_heatmap, cmap='coolwarm', aspect='auto', vmin=-1, vmax=1, origin='lower')
     plt.colorbar(label='Probability')
     plt.title('Throttle Probability Heatmap')
-    plt.xlabel('Timestep')
-    plt.ylabel('Action Value Index')
+    plt.xlabel('Acceleration')
+    plt.ylabel('Timestep')
+    plt.xticks([0, 25, 50, 75, 99], ['-1', '-0.5', '0', '0.5', '1'])
     
     plt.tight_layout()
     plt.show()
