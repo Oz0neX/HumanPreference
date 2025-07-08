@@ -10,7 +10,7 @@ from metadrive.examples.ppo_expert.numpy_expert import expert
 from imitation.data import types
 from imitation.data import serialize
 
-IS_TEACHING_EXPERIMENT = False
+IS_TEACHING_EXPERIMENT = True
 NUM_TEACHING = 2
 NUM_OPTIMAL = 3
 
@@ -87,6 +87,7 @@ class RobotTeachingApp:
         self.current_episode_acts = []
         self.current_episode_infos = []
         self.recording_started = False
+        self.trajectory_saved = False
         self.start_position = None
         self.trajectory_data_dir = "trajectory_data"
         
@@ -163,9 +164,10 @@ class RobotTeachingApp:
         self.run_demonstration(policy_type)
 
     def next_phase(self):
-        # Save trajectory if we have recorded data
-        if self.recording_started and len(self.current_episode_obs) > 0:
+        # Save trajectory if we have recorded data and haven't saved it yet
+        if self.recording_started and len(self.current_episode_obs) > 0 and not self.trajectory_saved:
             self.save_trajectory()
+            self.trajectory_saved = True
         
         if self.current_part == 1 and self.current_iteration >= self.part1_iterations:
             self.complete_part1()
@@ -234,6 +236,7 @@ class RobotTeachingApp:
         self.current_episode_acts = []
         self.current_episode_infos = []
         self.recording_started = False
+        self.trajectory_saved = False
         self.start_position = None
         self.current_policy_type = policy_type
         
@@ -322,27 +325,13 @@ class RobotTeachingApp:
                 
                 # If recording, capture data in gym format
                 if self.recording_started:
-                    # Capture observation: vehicle position, heading, speed
-                    current_position = np.array([self.env.agent.position[0], self.env.agent.position[1]])
-                    current_heading = self.env.agent.heading_theta
-                    current_speed = self.env.agent.speed
+                    # Capture the full 259-dimensional observation from MetaDrive
+                    current_obs = obs.copy()  # obs is already the full observation from env.step()
                     
-                    # Observation: vehicle_x, vehicle_y, vehicle_heading, vehicle_speed
-                    current_obs = np.array([
-                        round(current_position[0], 5),
-                        round(current_position[1], 5),
-                        round(current_heading, 5),
-                        round(current_speed, 5)
-                    ], dtype=np.float32)
-                    
-                    # Capture action: key states
-                    key_states = self.get_key_states()
-                    current_act = np.array([
-                        key_states['forward'],
-                        key_states['left'],
-                        key_states['right'],
-                        key_states['brake']
-                    ], dtype=np.int64)
+                    # Capture action: convert steering and throttle to proper action format
+                    steering = info.get('steering', 0.0) if info else 0.0
+                    throttle = info.get('acceleration', 0.0) if info else 0.0
+                    current_act = np.array([steering, throttle], dtype=np.float32)
                     
                     self.current_episode_obs.append(current_obs)
                     self.current_episode_acts.append(current_act)
@@ -379,30 +368,33 @@ class RobotTeachingApp:
                 terminal=True
             )
             
-            # Determine save path based on policy type and map seed
+            # Determine save path based on policy type and current seed used
             if self.current_policy_type == "human_demo":
                 demo_type = "optimal"
             else:
                 demo_type = "teaching"
             
-            # Get the current map seed
-            if IS_TEACHING_EXPERIMENT:
-                map_seed = self.teaching_seed if self.current_iteration <= 4 else self.demo_seed
-            else:
-                map_seed = self.demo_seed if self.current_iteration <= 2 else self.teaching_seed
+            # Get the actual seed that was used for this environment
+            current_seed = self.env.current_seed if self.env else None
+            if current_seed is None:
+                # Fallback: determine seed based on current phase
+                if IS_TEACHING_EXPERIMENT:
+                    current_seed = self.teaching_seed if self.current_iteration <= self.part1_iterations else self.demo_seed
+                else:
+                    current_seed = self.demo_seed if self.current_iteration <= self.part1_iterations else self.teaching_seed
             
             # Create directory structure: trajectory_data/map_XXXXX/demo_type/
-            save_dir = os.path.join(self.trajectory_data_dir, f"map_{map_seed}", demo_type)
+            save_dir = os.path.join(self.trajectory_data_dir, f"map_{current_seed}", demo_type)
             os.makedirs(save_dir, exist_ok=True)
             
             # Create timestamp for unique filename
-            timestamp = datetime.now().strftime("%m%d_%H%M_%S")
+            timestamp = datetime.now().strftime("%m%d_%H%M%S_%f")[:-3]  # Include milliseconds to avoid duplicates
             save_path = os.path.join(save_dir, f"trajectory_{timestamp}")
             
             # Save trajectory using imitation library
             serialize.save(save_path, [trajectory])
             
-            print(f"Saved {demo_type} trajectory with {len(self.current_episode_obs)} steps to {save_path}")
+            print(f"Saved {demo_type} trajectory with {len(self.current_episode_obs)} steps to {save_path} (seed: {current_seed})")
             
         except Exception as e:
             print(f"Error saving trajectory: {e}")
