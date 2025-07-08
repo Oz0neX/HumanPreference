@@ -76,8 +76,10 @@ def train(transitions, seed):
             
             steering_logits = torch.tensor(steering_logits)
             throttle_logits = torch.tensor(throttle_logits)
+
             steering_probs = F.softmax(steering_logits, dim=0).numpy()
             throttle_probs = F.softmax(throttle_logits, dim=0).numpy()
+            print(steering_probs)
             
             action_distributions.append({
                 'steering_grid': action_grid.numpy(),
@@ -95,22 +97,51 @@ def train(transitions, seed):
     print(f"Captured {len(action_distributions)} timesteps of action distributions")
     env.close()
     
-    print(np.array(action_distributions).shape)
-    timesteps_to_show = min(50, len(action_distributions))
+    obs = env.reset()[0]
+    trajectory_x = []
+    trajectory_y = []
     
-    plt.figure(figsize=(50, 40))
+    for i in range(len(action_distributions)):
+        action = bc_trainer.policy.action_dist.sample()
+        obs, _, terminated, truncated, _ = env.step(action.cpu().numpy().flatten())
+        trajectory_x.append(env.agent.position[0])
+        trajectory_y.append(env.agent.position[1])
+        if terminated or truncated:
+            break
     
-    for i in range(timesteps_to_show):
-        plt.subplot(10, 5, i+1)
-        plt.plot(action_distributions[i]['steering_grid'], action_distributions[i]['steering_probs'], label='Steering', color='blue')
-        plt.plot(action_distributions[i]['throttle_grid'], action_distributions[i]['throttle_probs'], label='Throttle', color='red')
-        plt.title(f'Timestep {i + 1}')
-        plt.xlabel('Action Value')
-        plt.ylabel('Probability')
-        plt.legend()
+    env.close()
+    
+    timesteps_to_show = min(1000, len(trajectory_x))
+    steering_heatmap = np.array([dist['steering_probs'] for dist in action_distributions[:timesteps_to_show]])
+    throttle_heatmap = np.array([dist['throttle_probs'] for dist in action_distributions[:timesteps_to_show]])
+    
+    plt.figure(figsize=(18, 6))
+    
+    plt.subplot(1, 3, 1)
+    plt.plot(trajectory_y[:timesteps_to_show], trajectory_x[:timesteps_to_show], 'b-', linewidth=2)
+    plt.scatter(trajectory_y[0], trajectory_x[0], color='green', s=100, label='Start')
+    plt.scatter(trajectory_y[timesteps_to_show-1], trajectory_x[timesteps_to_show-1], color='red', s=100, label='End')
+    plt.title('Vehicle Trajectory')
+    plt.xlabel('X Position')
+    plt.ylabel('Y Position')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.subplot(1, 3, 2)
+    plt.imshow(steering_heatmap, cmap='coolwarm', aspect='auto', vmin=-0.5, vmax=0.5)
+    plt.colorbar(label='Probability')
+    plt.title('Steering Probability Heatmap')
+    plt.xlabel('Timestep')
+    plt.ylabel('Action Value Index')
+    
+    plt.subplot(1, 3, 3)
+    plt.imshow(throttle_heatmap, cmap='coolwarm', aspect='auto', vmin=0, vmax=1)
+    plt.colorbar(label='Probability')
+    plt.title('Throttle Probability Heatmap')
+    plt.xlabel('Timestep')
+    plt.ylabel('Action Value Index')
     
     plt.tight_layout()
-    plt.savefig(f'action_distributions_seed_{seed}.png')
     plt.show()
     sys.exit()
     
