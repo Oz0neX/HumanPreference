@@ -50,7 +50,7 @@ def train(transitions, seed):
     
     obs = env.reset()[0]
     action_distributions = []
-    action_grid = torch.linspace(-1, 1, 100)
+    action_grid = torch.linspace(-1, 1, 30)
     
     for _ in range(1000):
         obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
@@ -125,6 +125,10 @@ def train(transitions, seed):
     plt.plot(trajectory_y[:timesteps_to_show], trajectory_x[:timesteps_to_show], 'b-', linewidth=2)
     plt.scatter(trajectory_y[0], trajectory_x[0], color='green', s=100, label='Start')
     plt.scatter(trajectory_y[timesteps_to_show-1], trajectory_x[timesteps_to_show-1], color='red', s=100, label='End')
+    import matplotlib.cm as cm
+    colors = cm.rainbow(np.linspace(0, 1, len(range(10, timesteps_to_show, 10))))
+    for idx, i in enumerate(range(10, timesteps_to_show, 10)):
+        plt.scatter(trajectory_y[i], trajectory_x[i], color=colors[idx], s=75)
     plt.title('Vehicle Trajectory')
     plt.xlabel('X Position')
     plt.ylabel('Y Position')
@@ -137,7 +141,8 @@ def train(transitions, seed):
     plt.title('Steering Probability Heatmap')
     plt.xlabel('(Left) <- Steering Direction -> (Right)')
     plt.ylabel('Timestep')
-    plt.xticks([0, 25, 50, 75, 99], ['-1', '-0.5', '0', '0.5', '1'])
+    for idx, i in enumerate(range(10, timesteps_to_show, 10)):
+        plt.axhline(y=i, color=colors[idx], linewidth=2)
     
     plt.subplot(1, 3, 3)
     plt.imshow(throttle_heatmap, cmap='coolwarm', aspect='auto', vmin=-1, vmax=1, origin='lower')
@@ -145,7 +150,8 @@ def train(transitions, seed):
     plt.title('Throttle Probability Heatmap')
     plt.xlabel('Acceleration')
     plt.ylabel('Timestep')
-    plt.xticks([0, 25, 50, 75, 99], ['-1', '-0.5', '0', '0.5', '1'])
+    for idx, i in enumerate(range(10, timesteps_to_show, 10)):
+        plt.axhline(y=i, color=colors[idx], linewidth=2)
     
     plt.tight_layout()
     plt.show()
