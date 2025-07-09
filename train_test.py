@@ -27,14 +27,14 @@ def train(transitions, seed):
         "traffic_density": 0,
         "map": "SCS",
         "start_seed": seed,
-        "horizon": 300
+        "horizon": 250
     })
 
     custom_policy = ActorCriticPolicy(
         observation_space=env.observation_space,
         action_space=env.action_space,
-        lr_schedule=lambda _: 3e-4,
-        net_arch=[32, 128, 128, 32]
+        net_arch=[32, 64, 128, 64, 32],
+        lr_schedule=lambda _: torch.finfo(torch.float32).max
     )
     
     bc_trainer = bc.BC(
@@ -43,10 +43,10 @@ def train(transitions, seed):
         demonstrations=transitions,
         rng=np.random.default_rng(0),
         policy=custom_policy,
-        batch_size=50,
+        batch_size=10,
     )
 
-    bc_trainer.train(n_epochs=100)
+    bc_trainer.train(n_epochs=3)
     
     obs = env.reset()[0]
     action_distributions = []
@@ -95,21 +95,45 @@ def train(transitions, seed):
     print(f"Captured {len(action_distributions)} timesteps of action distributions")
     env.close()
     
-    obs = env.reset()[0]
-    trajectory_x = []
-    trajectory_y = []
+    STEPS = 1000
+    num_rollouts = 10
+    all_trajectories_x = []
+    all_trajectories_y = []
     
-    for i in range(len(action_distributions)):
-        action = bc_trainer.policy.action_dist.sample()
-        obs, _, terminated, truncated, _ = env.step(action.cpu().numpy().flatten())
-        trajectory_x.append(env.agent.position[0])
-        trajectory_y.append(env.agent.position[1])
-        if terminated or truncated:
-            break
+    for rollout in range(num_rollouts):
+        obs = env.reset()[0]
+        trajectory_x = []
+        trajectory_y = []
+        
+        for i in range(min(len(action_distributions), STEPS)):
+            obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
+            with torch.no_grad():
+                features = bc_trainer.policy.extract_features(obs_tensor)
+                latent_pi = bc_trainer.policy.mlp_extractor.forward_actor(features)
+                mean_actions = bc_trainer.policy.action_net(latent_pi)
+                log_std = bc_trainer.policy.log_std
+                bc_trainer.policy.action_dist.proba_distribution(mean_actions, log_std)
+                action = bc_trainer.policy.action_dist.sample()
+            
+            trajectory_x.append(env.agent.position[0])
+            trajectory_y.append(env.agent.position[1])
+            obs, _, terminated, truncated, _ = env.step(action.cpu().numpy().flatten())
+            if terminated or truncated:
+                break
+        
+        all_trajectories_x.append(trajectory_x)
+        all_trajectories_y.append(trajectory_y)
     
-    env.close()
+    min_length = min(len(traj) for traj in all_trajectories_x)
+    trajectory_x_array = np.array([traj[:min_length] for traj in all_trajectories_x])
+    trajectory_y_array = np.array([traj[:min_length] for traj in all_trajectories_y])
     
-    timesteps_to_show = min(1000, len(trajectory_x))
+    mean_x = np.mean(trajectory_x_array, axis=0)
+    mean_y = np.mean(trajectory_y_array, axis=0)
+    std_x = np.std(trajectory_x_array, axis=0)
+    std_y = np.std(trajectory_y_array, axis=0)
+    
+    timesteps_to_show = min(STEPS, len(trajectory_x))
     steering_heatmap = np.array([dist['steering_probs'] for dist in action_distributions[:timesteps_to_show]])
     throttle_heatmap = np.array([dist['throttle_probs'] for dist in action_distributions[:timesteps_to_show]])
     
@@ -122,14 +146,33 @@ def train(transitions, seed):
     plt.figure(figsize=(18, 6))
     
     plt.subplot(1, 3, 1)
-    plt.plot(trajectory_y[:timesteps_to_show], trajectory_x[:timesteps_to_show], 'b-', linewidth=2)
-    plt.scatter(trajectory_y[0], trajectory_x[0], color='green', s=100, label='Start')
-    plt.scatter(trajectory_y[timesteps_to_show-1], trajectory_x[timesteps_to_show-1], color='red', s=100, label='End')
+    timesteps_to_show = min(min_length, STEPS)
+    
+    # Plot +2σ and -2σ trajectories (outermost - yellow)
+    plt.plot(mean_y[:timesteps_to_show] + 2*std_y[:timesteps_to_show], 
+             mean_x[:timesteps_to_show] + 2*std_x[:timesteps_to_show], 
+             'yellow', alpha=0.7, linewidth=2)
+    plt.plot(mean_y[:timesteps_to_show] - 2*std_y[:timesteps_to_show], 
+             mean_x[:timesteps_to_show] - 2*std_x[:timesteps_to_show], 
+             'yellow', alpha=0.7, linewidth=2)
+    
+    # Plot +1σ and -1σ trajectories (middle - orange)
+    plt.plot(mean_y[:timesteps_to_show] + std_y[:timesteps_to_show], 
+             mean_x[:timesteps_to_show] + std_x[:timesteps_to_show], 
+             'orange', alpha=0.7, linewidth=2)
+    plt.plot(mean_y[:timesteps_to_show] - std_y[:timesteps_to_show], 
+             mean_x[:timesteps_to_show] - std_x[:timesteps_to_show], 
+             'orange', alpha=0.7, linewidth=2)
+    plt.plot(mean_y[:timesteps_to_show], mean_x[:timesteps_to_show], 'red', linewidth=3)
+    plt.scatter(mean_y[0], mean_x[0], color='green', s=100, label='Start')
+    plt.scatter(mean_y[timesteps_to_show-1], mean_x[timesteps_to_show-1], color='red', s=100, label='End')
+    
     import matplotlib.cm as cm
     colors = cm.rainbow(np.linspace(0, 1, len(range(10, timesteps_to_show, 10))))
     for idx, i in enumerate(range(10, timesteps_to_show, 10)):
-        plt.scatter(trajectory_y[i], trajectory_x[i], color=colors[idx], s=75)
-    plt.title('Vehicle Trajectory')
+        plt.scatter(mean_y[i], mean_x[i], color=colors[idx], s=75)
+    
+    plt.title('Vehicle Trajectory with Uncertainty')
     plt.xlabel('X Position')
     plt.ylabel('Y Position')
     plt.legend()
