@@ -27,14 +27,14 @@ def train(transitions, seed):
         "traffic_density": 0,
         "map": "SCS",
         "start_seed": seed,
-        "horizon": 250
+        "horizon": 1000
     })
 
     custom_policy = ActorCriticPolicy(
         observation_space=env.observation_space,
         action_space=env.action_space,
-        net_arch=[32, 64, 128, 64, 32],
-        lr_schedule=lambda _: torch.finfo(torch.float32).max
+        net_arch=[32, 64, 32, 6],
+        lr_schedule=lambda _: 3e-4
     )
     
     bc_trainer = bc.BC(
@@ -43,14 +43,14 @@ def train(transitions, seed):
         demonstrations=transitions,
         rng=np.random.default_rng(0),
         policy=custom_policy,
-        batch_size=10,
+        batch_size=300,
     )
 
-    bc_trainer.train(n_epochs=3)
+    bc_trainer.train(n_epochs=300)
     
     obs = env.reset()[0]
     action_distributions = []
-    action_grid = torch.linspace(-1, 1, 30)
+    action_grid = torch.linspace(-1, 1, 100)
     
     for _ in range(1000):
         obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
@@ -96,16 +96,16 @@ def train(transitions, seed):
     env.close()
     
     STEPS = 1000
-    num_rollouts = 10
+    num_rollouts = 50
     all_trajectories_x = []
     all_trajectories_y = []
     
-    for rollout in range(num_rollouts):
+    for _ in range(num_rollouts):
         obs = env.reset()[0]
         trajectory_x = []
         trajectory_y = []
         
-        for i in range(min(len(action_distributions), STEPS)):
+        for i in range(min(len(action_distributions), STEPS)):  
             obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
             with torch.no_grad():
                 features = bc_trainer.policy.extract_features(obs_tensor)
@@ -137,8 +137,8 @@ def train(transitions, seed):
     steering_heatmap = np.array([dist['steering_probs'] for dist in action_distributions[:timesteps_to_show]])
     throttle_heatmap = np.array([dist['throttle_probs'] for dist in action_distributions[:timesteps_to_show]])
     
-    steering_scaler = MinMaxScaler(feature_range=(-1, 1))
-    throttle_scaler = MinMaxScaler(feature_range=(-1, 1))
+    steering_scaler = MinMaxScaler(feature_range=(0, 1))
+    throttle_scaler = MinMaxScaler(feature_range=(0, 1))
     
     steering_heatmap = steering_scaler.fit_transform(steering_heatmap.flatten().reshape(-1, 1)).reshape(steering_heatmap.shape)
     throttle_heatmap = throttle_scaler.fit_transform(throttle_heatmap.flatten().reshape(-1, 1)).reshape(throttle_heatmap.shape)
@@ -175,24 +175,27 @@ def train(transitions, seed):
     plt.title('Vehicle Trajectory with Uncertainty')
     plt.xlabel('X Position')
     plt.ylabel('Y Position')
+    plt.gca().invert_xaxis()
     plt.legend()
     plt.grid(True)
     
     plt.subplot(1, 3, 2)
-    plt.imshow(steering_heatmap, cmap='coolwarm', aspect='auto', vmin=-1, vmax=1, origin='lower')
+    plt.imshow(np.fliplr(steering_heatmap), cmap='coolwarm', aspect='auto', vmin=0, vmax=1, origin='lower', extent=[-1, 1, 0, timesteps_to_show])
     plt.colorbar(label='Probability')
     plt.title('Steering Probability Heatmap')
-    plt.xlabel('(Left) <- Steering Direction -> (Right)')
+    plt.xlabel('[Left] <-- Steering Direction --> [Right]')
     plt.ylabel('Timestep')
+    plt.xticks([-1, -0.5, 0, 0.5, 1])  # Set fewer x-axis ticks
     for idx, i in enumerate(range(10, timesteps_to_show, 10)):
         plt.axhline(y=i, color=colors[idx], linewidth=2)
     
     plt.subplot(1, 3, 3)
-    plt.imshow(throttle_heatmap, cmap='coolwarm', aspect='auto', vmin=-1, vmax=1, origin='lower')
+    plt.imshow(throttle_heatmap, cmap='coolwarm', aspect='auto', vmin=0, vmax=1, origin='lower', extent=[-1, 1, 0, timesteps_to_show])
     plt.colorbar(label='Probability')
     plt.title('Throttle Probability Heatmap')
-    plt.xlabel('Acceleration')
+    plt.xlabel('[Break] <-- Acceleration --> [Throttle]')
     plt.ylabel('Timestep')
+    plt.xticks([-1, -0.5, 0, 0.5, 1])  # Set fewer x-axis ticks
     for idx, i in enumerate(range(10, timesteps_to_show, 10)):
         plt.axhline(y=i, color=colors[idx], linewidth=2)
     

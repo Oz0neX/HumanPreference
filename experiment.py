@@ -11,8 +11,8 @@ from imitation.data import types
 from imitation.data import serialize
 
 IS_TEACHING_EXPERIMENT = True
-NUM_TEACHING = 2
-NUM_OPTIMAL = 3
+NUM_TEACHING = 0
+NUM_OPTIMAL = 15
 
 main_color = '#3e3e42'
 secondary_color = '#252526'
@@ -310,7 +310,6 @@ class RobotTeachingApp:
                 action = [steering, throttle]
             else:
                 action = self.policy.act()
-                print(f"Agent action: {action}")  # Debug: show agent actions
                 obs, reward, terminated, truncated, info = self.env.step(action)
             
             if self.current_policy_type in ["human", "human_demo"]:
@@ -325,10 +324,8 @@ class RobotTeachingApp:
                 
                 # If recording, capture data in gym format
                 if self.recording_started:
-                    # Capture the full 259-dimensional observation from MetaDrive
-                    current_obs = obs.copy()  # obs is already the full observation from env.step()
-                    
-                    # Capture action: convert steering and throttle to proper action format
+                    current_obs = obs.copy()
+
                     steering = info.get('steering', 0.0) if info else 0.0
                     throttle = info.get('acceleration', 0.0) if info else 0.0
                     current_act = np.array([steering, throttle], dtype=np.float32)
