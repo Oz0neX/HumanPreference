@@ -2,6 +2,26 @@ import numpy as np
 import os
 import glob
 from imitation.data import serialize
+from imitation.data.types import Trajectory
+
+def add_trajectory_ids(trajectories, start_id=0):
+    new_trajectories = []
+    t_id_counter = start_id
+    for traj in trajectories:
+        new_infos = np.array(
+            [{**info, 't_id': t_id_counter} for info in traj.infos]
+        )
+        
+        new_traj = Trajectory(
+            obs=traj.obs,
+            acts=traj.acts,
+            infos=new_infos,
+            terminal=traj.terminal,
+        )
+        new_trajectories.append(new_traj)
+        t_id_counter += 1
+        
+    return new_trajectories, t_id_counter
 
 def load_trajectories_from_directory(directory_path):
     """Load trajectories from a directory using imitation library's serialize.load()"""
@@ -18,7 +38,7 @@ def load_trajectories_from_directory(directory_path):
             # Load trajectory using imitation library
             loaded_trajectories = serialize.load(file_path)
             trajectories.extend(loaded_trajectories)
-            print(f"Loaded trajectory from {file_path} with {len(loaded_trajectories)} trajectories")
+            print(f"Loaded {len(loaded_trajectories)} trajectories from {file_path}")
         except Exception as e:
             print(f"Error loading {file_path}: {e}")
     
@@ -27,7 +47,8 @@ def load_trajectories_from_directory(directory_path):
 def extract_data():
     """Extract trajectory data from the trajectory_data directory structure"""
     maps_data = {}
-    
+    t_id_counter = 0
+
     if not os.path.exists("trajectory_data"):
         print("trajectory_data directory not found!")
         return maps_data
@@ -41,11 +62,13 @@ def extract_data():
         # Load optimal trajectories
         optimal_dir = os.path.join(map_path, "optimal")
         optimal_trajectories = load_trajectories_from_directory(optimal_dir)
+        optimal_trajectories, t_id_counter = add_trajectory_ids(optimal_trajectories, t_id_counter)
         maps_data[map_name]['optimal'] = optimal_trajectories
         
         # Load teaching trajectories
         teaching_dir = os.path.join(map_path, "teaching")
         teaching_trajectories = load_trajectories_from_directory(teaching_dir)
+        teaching_trajectories, t_id_counter = add_trajectory_ids(teaching_trajectories, t_id_counter)
         maps_data[map_name]['teaching'] = teaching_trajectories
         
         print(f"Map {map_name}: {len(optimal_trajectories)} optimal, {len(teaching_trajectories)} teaching trajectories")
