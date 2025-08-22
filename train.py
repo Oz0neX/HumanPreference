@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+import csv
 
 maps_data = extract_data()
 
@@ -16,7 +17,7 @@ if not maps_data:
     print("No trajectory data was found. Exiting.")
     sys.exit(1)
 
-def train(transitions, seed):
+def train(transitions, seed, demo_type):
     env = MetaDriveEnv(config={
         "on_continuous_line_done": False,
         "out_of_route_done": False,
@@ -46,23 +47,38 @@ def train(transitions, seed):
         batch_size=300,
     )
 
-    bc_trainer.train(n_epochs=10)
-    # Calculating with the BC policy actions
+    bc_trainer.train(n_epochs=300)
     by_step, by_traj, by_step_random, by_traj_random = bc_trainer.calculate_teaching_volume()
-    print(f"By timestep: {by_step}")
-    print(f"By trajectory: {by_traj}")
-    print(f"(Random policy) By timestep r: {by_step_random}")
-    print(f"(Random policy) By trajectory: {by_traj_random}")
-    # Calculating with the Random policy actions
-    sys.exit()
+    
+    all_traj_ids = sorted(by_step.keys())
+    
+    with open(f'teaching_volume_{demo_type}_results.csv', 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['trajectory_id', 'bc_timestep', 'bc_trajectory', 'random_timestep', 'random_trajectory'])
+        for t_id in all_traj_ids:
+            writer.writerow([
+                t_id,
+                round(by_step.get(t_id, 0), 5),
+                round(by_traj.get(t_id, 0), 5),
+                round(by_step_random.get(t_id, 0), 5),
+                round(by_traj_random.get(t_id, 0), 5)
+            ])
+        
+        writer.writerow([
+            'SUM',
+            round(sum(by_step.values()), 5),
+            round(sum(by_traj.values()), 5),
+            round(sum(by_step_random.values()), 5),
+            round(sum(by_traj_random.values()), 5)
+        ])
     
 for map_name, trajectories_dict in maps_data.items():
     seed = int(map_name.split('_')[1])
     
     optimal_trajectories = trajectories_dict.get('optimal', [])
     optimal_transitions = flatten_trajectories(optimal_trajectories)
-    train(optimal_transitions, seed)
+    train(optimal_transitions, seed, "optimal")
     
     teaching_trajectories = trajectories_dict.get('teaching', [])
     teaching_transitions = flatten_trajectories(teaching_trajectories)
-    train(teaching_transitions, seed)
+    train(teaching_transitions, seed, "teaching")
