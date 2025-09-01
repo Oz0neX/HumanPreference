@@ -283,13 +283,14 @@ class RobotTeachingApp:
                 "start_seed": seed,
                 "manual_control": is_manual, 
                 "use_render": True, 
-                "window_size": (800, 600),  # Fixed size, no embedding
-                "multi_thread_render": False,  # Critical: disable multi-threading
+                "window_size": (800, 600),
+                "multi_thread_render": False,
                 "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
-                "on_continuous_line_done": False,  # Prevent termination when crossing continuous lines
-                "out_of_route_done": False,  # Prevent termination when going out of route
-                "crash_vehicle_done": False,  # Enable termination when crashing with other vehicles
-                "crash_object_done": False,  # Enable termination when crashing with objects
+                "on_continuous_line_done": False,
+                "out_of_route_done": False,
+                "crash_vehicle_done": False,
+                "crash_object_done": False,
+                "discrete_action": True
             }
             
             self.env = MetaDriveEnv(config)

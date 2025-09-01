@@ -5,7 +5,6 @@ from load_trajectories import extract_data
 import numpy as np
 from metadrive.envs.metadrive_env import MetaDriveEnv
 from stable_baselines3.common.policies import ActorCriticPolicy
-import torch
 from scipy.stats import entropy
 
 BATCH_SIZE = 300
@@ -32,7 +31,8 @@ env = MetaDriveEnv(config={
     "traffic_density": 0,
     "map": "SCS",
     "start_seed": seed,
-    "horizon": 1000
+    "horizon": 1000,
+    "discrete_action": True
 })
 
 def create_policy():
@@ -41,15 +41,40 @@ def create_policy():
         net_arch=[32, 64, 32, 6], lr_schedule=lambda _: 3e-4
     )
 
-def calculate_distribution(bc_tv_dict, random_tv_dict):
+#KL Divergence stuff
+# def calculate_distribution(bc_tv_dict, random_tv_dict):
+#     bc_tvs = np.array(list(bc_tv_dict.values()))
+#     rand_tvs = np.array(list(random_tv_dict.values()))
+#     sum_exp_bc = np.sum(np.exp(bc_tvs))
+#     sum_exp_rand = np.sum(np.exp(rand_tvs))
+#     denominator = sum_exp_bc + sum_exp_rand
+#     raw_likelihoods = np.exp(bc_tvs) / denominator
+#     final_dist = raw_likelihoods / np.sum(raw_likelihoods)
+#     return final_dist
+
+def calculate_tv_likelihood(bc_tv_dict, random_tv_dict):
     bc_tvs = np.array(list(bc_tv_dict.values()))
+    bc_tvs = -bc_tvs
     rand_tvs = np.array(list(random_tv_dict.values()))
-    sum_exp_bc = np.sum(np.exp(bc_tvs))
-    sum_exp_rand = np.sum(np.exp(rand_tvs))
-    denominator = sum_exp_bc + sum_exp_rand
-    raw_likelihoods = np.exp(bc_tvs) / denominator
-    final_dist = raw_likelihoods / np.sum(raw_likelihoods)
-    return final_dist
+    rand_tvs = -rand_tvs
+    print(f"\n\n\nBCCCC: {bc_tvs}")
+    print(f"\n\n\nRANDDD: {rand_tvs}")
+
+    sum_exp_random_tv = np.sum(np.exp(rand_tvs))
+    
+    likelihoods = []
+    for bc_tv in bc_tvs:
+        exp_bc_tv = np.exp(bc_tv)
+        p_i = exp_bc_tv / (exp_bc_tv + sum_exp_random_tv)
+        likelihoods.append(p_i)
+    
+    print(likelihoods)
+    result = 0
+    for v in likelihoods:
+        result *= v
+        if result == 0: result = v
+
+    return result
 
 optimal_model = bc.BC(
     observation_space=env.observation_space,
@@ -75,13 +100,14 @@ optimal_demos = optimal_model._demo_data_loader
 teaching_demos = teaching_model._demo_data_loader
 
 tv_opt_on_opt = optimal_model.calculate_teaching_volume(eval_grad_norm_opt, optimal_demos)
-tv_opt_on_teach = optimal_model.calculate_teaching_volume(eval_grad_norm_opt, optimal_demos)
+tv_opt_on_teach = optimal_model.calculate_teaching_volume(eval_grad_norm_opt, teaching_demos)
 
 tv_teach_on_teach = teaching_model.calculate_teaching_volume(eval_grad_norm_teach, teaching_demos)
-tv_teach_on_opt = teaching_model.calculate_teaching_volume(eval_grad_norm_teach, teaching_demos)
+tv_teach_on_opt = teaching_model.calculate_teaching_volume(eval_grad_norm_teach, optimal_demos)
 
 results = {}
 
+#KL Divergence stuff
 # Data format tv_type_on_type[0, 1, 2, 3]
 # tv_type_on_type[0]: BC Timestep TV
 # tv_type_on_type[1]: BC Trajectory TV
@@ -89,30 +115,65 @@ results = {}
 # tv_type_on_type[3]: Random Trajectory TV
 
 # By timestep
-dist_opt_on_opt_ts = calculate_distribution(tv_opt_on_opt[0], tv_opt_on_opt[2])
-dist_opt_on_teach_ts = calculate_distribution(tv_opt_on_teach[0], tv_opt_on_teach[2])
-results['kl_opt_model_timestep'] = entropy(dist_opt_on_opt_ts, dist_opt_on_teach_ts)
+# dist_opt_on_opt_ts = calculate_distribution(tv_opt_on_opt[0], tv_opt_on_opt[2])
+# dist_opt_on_teach_ts = calculate_distribution(tv_opt_on_teach[0], tv_opt_on_teach[2])
+# results['kl_opt_model_timestep'] = entropy(dist_opt_on_opt_ts, dist_opt_on_teach_ts)
 
-dist_teach_on_teach_ts = calculate_distribution(tv_teach_on_teach[0], tv_teach_on_teach[2])
-dist_teach_on_opt_ts = calculate_distribution(tv_teach_on_opt[0], tv_teach_on_opt[2])
-results['kl_teach_model_timestep'] = entropy(dist_teach_on_teach_ts, dist_teach_on_opt_ts)
+# dist_teach_on_teach_ts = calculate_distribution(tv_teach_on_teach[0], tv_teach_on_teach[2])
+# dist_teach_on_opt_ts = calculate_distribution(tv_teach_on_opt[0], tv_teach_on_opt[2])
+# results['kl_teach_model_timestep'] = entropy(dist_teach_on_teach_ts, dist_teach_on_opt_ts)
 
-# By trajectory
-dist_opt_on_opt_tj = calculate_distribution(tv_opt_on_opt[1], tv_opt_on_opt[3])
-dist_opt_on_teach_tj = calculate_distribution(tv_opt_on_teach[1], tv_opt_on_teach[3])
-results['kl_opt_model_trajectory'] = entropy(dist_opt_on_opt_tj, dist_opt_on_teach_tj)
+# # By trajectory
+# dist_opt_on_opt_tj = calculate_distribution(tv_opt_on_opt[1], tv_opt_on_opt[3])
+# dist_opt_on_teach_tj = calculate_distribution(tv_opt_on_teach[1], tv_opt_on_teach[3])
+# results['kl_opt_model_trajectory'] = entropy(dist_opt_on_opt_tj, dist_opt_on_teach_tj)
 
-dist_teach_on_teach_tj = calculate_distribution(tv_teach_on_teach[1], tv_teach_on_teach[3])
-dist_teach_on_opt_tj = calculate_distribution(tv_teach_on_opt[1], tv_teach_on_opt[3])
-results['kl_teach_model_trajectory'] = entropy(dist_teach_on_teach_tj, dist_teach_on_opt_tj)
+# dist_teach_on_teach_tj = calculate_distribution(tv_teach_on_teach[1], tv_teach_on_teach[3])
+# dist_teach_on_opt_tj = calculate_distribution(tv_teach_on_opt[1], tv_teach_on_opt[3])
+# results['kl_teach_model_trajectory'] = entropy(dist_teach_on_teach_tj, dist_teach_on_opt_tj)
 
-print("\n" + "="*50)
-print(" " * 15 + "KL DIVERGENCE RESULTS")
-print("="*50)
-print("\n## Timestep Divergence ##")
-print(f"Optimal Model KL: {results['kl_opt_model_timestep']:.5f}")
-print(f"Teaching Model KL: {results['kl_teach_model_timestep']:.5f}")
-print("\n## Trajectory Divergence ##")
-print(f"Optimal Model KL: {results['kl_opt_model_trajectory']:.5f}")
-print(f"Teaching Model KL: {results['kl_teach_model_trajectory']:.5f}")
-print("\n" + "="*50)
+results = {}
+results['tv_likelihood_timestep'] = {
+    'opt_on_opt': calculate_tv_likelihood(tv_opt_on_opt[0], tv_opt_on_opt[2]),
+    'opt_on_teach': calculate_tv_likelihood(tv_opt_on_teach[0], tv_opt_on_teach[2]),
+    'teach_on_teach': calculate_tv_likelihood(tv_teach_on_teach[0], tv_teach_on_teach[2]),
+    'teach_on_opt': calculate_tv_likelihood(tv_teach_on_opt[0], tv_teach_on_opt[2]),
+}
+results['tv_likelihood_trajectory'] = {
+    'opt_on_opt': calculate_tv_likelihood(tv_opt_on_opt[1], tv_opt_on_opt[3]),
+    'opt_on_teach': calculate_tv_likelihood(tv_opt_on_teach[1], tv_opt_on_teach[3]),
+    'teach_on_teach': calculate_tv_likelihood(tv_teach_on_teach[1], tv_teach_on_teach[3]),
+    'teach_on_opt': calculate_tv_likelihood(tv_teach_on_opt[1], tv_teach_on_opt[3]),
+}
+results['direct_log_likelihood'] = {
+    'opt_on_opt': tv_opt_on_opt[4],
+    'opt_on_teach': tv_opt_on_teach[4],
+    'teach_on_teach': tv_teach_on_teach[4],
+    'teach_on_opt': tv_teach_on_opt[4],
+}
+
+print("\n## TV-based prob by timestep ##")
+for key, val in results['tv_likelihood_timestep'].items():
+    print(f"{key:<15}: {val:.8f}")
+
+# print("\n## TV-based Log-Likelihood (Trajectory TV) ##")
+# for key, val in results['tv_likelihood_trajectory'].items():
+#     print(f"{key:<15}: {val}")
+    
+print("\n## Log-Likelihood based on model logits ##")
+for key, val in results['direct_log_likelihood'].items():
+    print(f"{key:<15}: {val:.3f}")
+
+print("\n" + "="*60)
+
+#KL Divergence stuff
+# print("\n" + "="*50)
+# print(" " * 15 + "KL DIVERGENCE RESULTS")
+# print("="*50)
+# print("\n## Timestep Divergence ##")
+# print(f"Optimal Model KL: {results['kl_opt_model_timestep']:.5f}")
+# print(f"Teaching Model KL: {results['kl_teach_model_timestep']:.5f}")
+# print("\n## Trajectory Divergence ##")
+# print(f"Optimal Model KL: {results['kl_opt_model_trajectory']:.5f}")
+# print(f"Teaching Model KL: {results['kl_teach_model_trajectory']:.5f}")
+# print("\n" + "="*50)
