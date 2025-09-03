@@ -9,7 +9,7 @@ from scipy.stats import entropy
 import torch
 from imitation.data.types import Trajectory
 
-BATCH_SIZE = 100
+BATCH_SIZE = 300
 TRAINING_EPOCHS = 300
 
 DISCRETE_STEERING_DIM = 5
@@ -99,8 +99,6 @@ def calculate_tv_likelihood(bc_tv_dict, random_tv_dict):
     bc_tvs = -bc_tvs
     rand_tvs = np.array(list(random_tv_dict.values()))
     rand_tvs = -rand_tvs
-    print(f"\n\n\nBCCCC: {bc_tvs}")
-    print(f"\n\n\nRANDDD: {rand_tvs}")
 
     sum_exp_random_tv = np.sum(np.exp(rand_tvs))
     
