@@ -1,0 +1,39 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "obs": {
+      "feature": {
+        "feature": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "_type": "List"
+      },
+      "_type": "List"
+    },
+    "acts": {
+      "feature": {
+        "feature": {
+          "dtype": "float32",
+          "_type": "Value"
+        },
+        "_type": "List"
+      },
+      "_type": "List"
+    },
+    "infos": {
+      "feature": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "_type": "List"
+    },
+    "terminal": {
+      "dtype": "bool",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}
