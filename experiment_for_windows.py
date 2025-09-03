@@ -11,9 +11,9 @@ from imitation.data import types
 from imitation.data import serialize
 
 
-IS_TEACHING_EXPERIMENT = False
-NUM_TEACHING = 15
-NUM_OPTIMAL = 0
+IS_TEACHING_EXPERIMENT = True
+NUM_TEACHING = 0
+NUM_OPTIMAL = 15
 
 main_color = '#3e3e42'
 secondary_color = '#252526'
@@ -290,7 +290,7 @@ class RobotTeachingApp:
                 "out_of_route_done": False,
                 "crash_vehicle_done": False,
                 "crash_object_done": False,
-                "discrete_action": True
+                "discrete_action": True,
             }
             
             self.env = MetaDriveEnv(config)
