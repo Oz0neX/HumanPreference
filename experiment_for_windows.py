@@ -15,6 +15,45 @@ IS_TEACHING_EXPERIMENT = True
 NUM_TEACHING = 0
 NUM_OPTIMAL = 15
 
+# Discrete action configuration
+DISCRETE_STEERING_DIM = 5
+DISCRETE_THROTTLE_DIM = 5
+
+def get_discrete_action_values(steering_dim=DISCRETE_STEERING_DIM, throttle_dim=DISCRETE_THROTTLE_DIM):
+    """
+    Get the discrete action values in range [-1, 1] for each dimension.
+    
+    Returns:
+        tuple of (steering_values, throttle_values) where each is a list of discrete values
+    """
+    steering_unit = 2.0 / (steering_dim - 1)
+    throttle_unit = 2.0 / (throttle_dim - 1)
+    
+    steering_values = [i * steering_unit - 1.0 for i in range(steering_dim)]
+    throttle_values = [i * throttle_unit - 1.0 for i in range(throttle_dim)]
+    
+    return steering_values, throttle_values
+
+def continuous_to_discrete_action(continuous_action, steering_values, throttle_values):
+    """
+    Convert continuous action to the closest discrete action value.
+    
+    Args:
+        continuous_action: numpy array of shape (2,) with values in [-1, 1]
+        steering_values: list of discrete steering values
+        throttle_values: list of discrete throttle values
+    
+    Returns:
+        discrete action values (numpy array of shape (2,) with values in [-1, 1])
+    """
+    steering, throttle = continuous_action[0], continuous_action[1]
+    
+    # Find closest discrete values
+    steering_discrete = min(steering_values, key=lambda x: abs(x - steering))
+    throttle_discrete = min(throttle_values, key=lambda x: abs(x - throttle))
+    
+    return np.array([steering_discrete, throttle_discrete], dtype=np.float32)
+
 main_color = '#3e3e42'
 secondary_color = '#252526'
 
@@ -185,12 +224,8 @@ class RobotTeachingApp:
     def complete_part1(self):
         self.running = False
         if self.env:
-            try:
-                self.env.close()
-            except Exception as e:
-                print(f"Warning: Error closing environment: {e}")
-            finally:
-                self.env = None
+            self.env.close()
+            self.env = None
         self.part1_complete = True
         self.update_ui_state(is_running=False, part1_complete=True)
         part_name = "TEACH the robot how to drive" if not IS_TEACHING_EXPERIMENT else "perform a normal drive"
@@ -213,12 +248,8 @@ class RobotTeachingApp:
             
         self.running = False
         if self.env:
-            try:
-                self.env.close()
-            except Exception as e:
-                print(f"Warning: Error closing environment: {e}")
-            finally:
-                self.env = None
+            self.env.close()
+            self.env = None
         self.update_ui_state(is_running=False)
         if not completed:
             part_name = "perform a normal drive" if IS_TEACHING_EXPERIMENT else "teach the robot how to drive"
@@ -291,6 +322,9 @@ class RobotTeachingApp:
                 "crash_vehicle_done": False,
                 "crash_object_done": False,
                 "discrete_action": True,
+                "discrete_steering_dim": DISCRETE_STEERING_DIM,
+                "discrete_throttle_dim": DISCRETE_THROTTLE_DIM,
+                "use_multi_discrete": True
             }
             
             self.env = MetaDriveEnv(config)
@@ -326,17 +360,21 @@ class RobotTeachingApp:
                     elif np.linalg.norm(current_position - self.start_position) >= 0.1:
                         self.recording_started = True
                         print("Started recording trajectory.")
-                
+
                 # If recording, capture data in gym format
                 if self.recording_started:
                     current_obs = obs.copy()
 
                     steering = info.get('steering', 0.0) if info else 0.0
                     throttle = info.get('acceleration', 0.0) if info else 0.0
-                    current_act = np.array([steering, throttle], dtype=np.float32)
+                    
+                    # Convert to discrete action values in range [-1, 1]
+                    steering_values, throttle_values = get_discrete_action_values()
+                    continuous_action = np.array([steering, throttle], dtype=np.float32)
+                    discrete_action = continuous_to_discrete_action(continuous_action, steering_values, throttle_values)
                     
                     self.current_episode_obs.append(current_obs)
-                    self.current_episode_acts.append(current_act)
+                    self.current_episode_acts.append(discrete_action)
                     self.current_episode_infos.append({})
             
             if terminated or truncated: 
@@ -397,6 +435,7 @@ class RobotTeachingApp:
             serialize.save(save_path, [trajectory])
             
             print(f"Saved {demo_type} trajectory with {len(self.current_episode_obs)} steps to {save_path} (seed: {current_seed})")
+            print(f"Actions are discrete values in range [-1, 1]: {actions.shape if len(actions) > 0 else 'No actions'}")
             
         except Exception as e:
             print(f"Error saving trajectory: {e}")

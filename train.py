@@ -6,9 +6,38 @@ import numpy as np
 from metadrive.envs.metadrive_env import MetaDriveEnv
 from stable_baselines3.common.policies import ActorCriticPolicy
 from scipy.stats import entropy
+import torch
+from imitation.data.types import Trajectory
 
-BATCH_SIZE = 300
+BATCH_SIZE = 100
 TRAINING_EPOCHS = 300
+
+DISCRETE_STEERING_DIM = 5
+DISCRETE_THROTTLE_DIM = 5
+
+def discrete_values_to_indices(discrete_values, steering_dim, throttle_dim):
+    steering, throttle = discrete_values[0], discrete_values[1]
+    
+    steering_idx = int(np.clip((steering + 1.0) / 2.0 * (steering_dim - 1), 0, steering_dim - 1))
+    throttle_idx = int(np.clip((throttle + 1.0) / 2.0 * (throttle_dim - 1), 0, throttle_dim - 1))
+    
+    return np.array([steering_idx, throttle_idx], dtype=np.int64)
+
+def convert_trajectory_actions_to_indices(trajectory, steering_dim=DISCRETE_STEERING_DIM, throttle_dim=DISCRETE_THROTTLE_DIM):
+    if len(trajectory.acts) == 0:
+        return trajectory
+    
+    discrete_actions = []
+    for action in trajectory.acts:
+        discrete_action = discrete_values_to_indices(action, steering_dim, throttle_dim)
+        discrete_actions.append(discrete_action)
+    
+    return Trajectory(
+        obs=trajectory.obs,
+        acts=np.array(discrete_actions, dtype=np.int64),
+        infos=trajectory.infos,
+        terminal=trajectory.terminal
+    )
 
 maps_data = extract_data()
 if not maps_data:
@@ -18,8 +47,18 @@ map_name = list(maps_data.keys())[0]
 trajectories_dict = maps_data[map_name]
 seed = int(map_name.split('_')[1])
 
-optimal_transitions = flatten_trajectories(trajectories_dict.get('optimal', []))
-teaching_transitions = flatten_trajectories(trajectories_dict.get('teaching', []))
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Trajectories are saved with discrete values in range [-1, 1]
+optimal_trajectories = trajectories_dict.get('optimal', [])
+teaching_trajectories = trajectories_dict.get('teaching', [])
+
+# Convert discrete values to indices for MultiDiscrete action space
+optimal_trajectories_indices = [convert_trajectory_actions_to_indices(traj) for traj in optimal_trajectories]
+teaching_trajectories_indices = [convert_trajectory_actions_to_indices(traj) for traj in teaching_trajectories]
+
+optimal_transitions = flatten_trajectories(optimal_trajectories_indices)
+teaching_transitions = flatten_trajectories(teaching_trajectories_indices)
 
 env = MetaDriveEnv(config={
     "on_continuous_line_done": False,
@@ -32,7 +71,10 @@ env = MetaDriveEnv(config={
     "map": "SCS",
     "start_seed": seed,
     "horizon": 1000,
-    "discrete_action": True
+    "discrete_action": True,
+    "discrete_steering_dim": DISCRETE_STEERING_DIM,
+    "discrete_throttle_dim": DISCRETE_THROTTLE_DIM,
+    "use_multi_discrete": True
 })
 
 def create_policy():
