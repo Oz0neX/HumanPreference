@@ -32,7 +32,8 @@ env = MetaDriveEnv(config={
     "traffic_density": 0,
     "map": "SCS",
     "start_seed": seed,
-    "horizon": 1000
+    "horizon": 1000,
+    "discrete_action": True
 })
 
 def create_policy():
