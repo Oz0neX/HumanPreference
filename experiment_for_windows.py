@@ -12,20 +12,14 @@ from imitation.data import serialize
 
 
 IS_TEACHING_EXPERIMENT = True
-NUM_TEACHING = 0
-NUM_OPTIMAL = 15
+NUM_TEACHING = 1
+NUM_OPTIMAL = 1
 
 # Discrete action configuration
 DISCRETE_STEERING_DIM = 5
 DISCRETE_THROTTLE_DIM = 5
 
 def get_discrete_action_values(steering_dim=DISCRETE_STEERING_DIM, throttle_dim=DISCRETE_THROTTLE_DIM):
-    """
-    Get the discrete action values in range [-1, 1] for each dimension.
-    
-    Returns:
-        tuple of (steering_values, throttle_values) where each is a list of discrete values
-    """
     steering_unit = 2.0 / (steering_dim - 1)
     throttle_unit = 2.0 / (throttle_dim - 1)
     
@@ -35,17 +29,6 @@ def get_discrete_action_values(steering_dim=DISCRETE_STEERING_DIM, throttle_dim=
     return steering_values, throttle_values
 
 def continuous_to_discrete_action(continuous_action, steering_values, throttle_values):
-    """
-    Convert continuous action to the closest discrete action value.
-    
-    Args:
-        continuous_action: numpy array of shape (2,) with values in [-1, 1]
-        steering_values: list of discrete steering values
-        throttle_values: list of discrete throttle values
-    
-    Returns:
-        discrete action values (numpy array of shape (2,) with values in [-1, 1])
-    """
     steering, throttle = continuous_action[0], continuous_action[1]
     
     # Find closest discrete values
@@ -58,23 +41,39 @@ main_color = '#3e3e42'
 secondary_color = '#252526'
 
 class NoisyExpertPolicy:
-    def __init__(self, vehicle, steering_noise=0.3, throttle_noise=0.2, corruption_prob=0.15):
+    def __init__(self, vehicle):
         self.vehicle = vehicle
         self.params = locals()
 
     def act(self):
-        if np.random.random() < self.params["corruption_prob"]:
-            return np.random.uniform(-1, 1, size=2)
         try:
-            # Instead of using expert, just return a simple turn action
-            # This will make the agent turn left with some noise
-            base_action = np.array([0.5, 1.0])  # Left turn, full throttle
-            noise = np.random.normal(0, [self.params["steering_noise"], self.params["throttle_noise"]])
-            return np.clip(base_action, -1, 1)
+            # For multi-discrete environment with DISCRETE_STEERING_DIM=5, DISCRETE_THROTTLE_DIM=5
+            # Steering values [0,1,2,3,4] map to [-1.0, -0.5, 0.0, 0.5, 1.0]
+            # Throttle values [0,1,2,3,4] map to [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+            # Simple noisy expert: slight left turn (steering index 3 = 0.5)
+            # with full throttle (throttle index 4 = 1.0)
+            # Add some noise to occasionally do different actions
+
+            steering_noise = 0.3  # Probability of different steering
+            throttle_noise = 0.2  # Probability of different throttle
+
+            if np.random.random() < steering_noise:
+                steering_idx = np.random.randint(0, 5)
+            else:
+                steering_idx = 3  # Prefer slight left turn
+
+            if np.random.random() < throttle_noise:
+                throttle_idx = np.random.randint(0, 5)
+            else:
+                throttle_idx = 4  # Prefer full throttle
+
+            # Return as tuple of integers for multi-discrete action space
+            return (steering_idx, throttle_idx)
+
         except Exception:
-            return np.random.uniform(-1, 1, size=2)
-
-
+            # Fallback to random discrete actions
+            return (np.random.randint(0, 5), np.random.randint(0, 5))
 
 class RobotTeachingApp:
     def __init__(self, root):
@@ -99,12 +98,12 @@ class RobotTeachingApp:
             optimal_sequence = ["human_demo"] * NUM_OPTIMAL
             
             # Combine: teaching first, then optimal
-            self.phase_sequence = teaching_sequence + optimal_sequence
+            self.phase_sequence = optimal_sequence + teaching_sequence
             self.total_iterations = len(self.phase_sequence)
             self.part1_iterations = len(teaching_sequence)
             self.part2_iterations = len(optimal_sequence)
             self.teaching_seed = 12345
-            self.demo_seed = 54321
+            self.demo_seed = 12345
         else:
             # Generate optimal phase sequence: human_demo for NUM_OPTIMAL times
             optimal_sequence = ["human_demo"] * NUM_OPTIMAL
@@ -119,7 +118,7 @@ class RobotTeachingApp:
             self.total_iterations = len(self.phase_sequence)
             self.part1_iterations = len(optimal_sequence)
             self.part2_iterations = len(teaching_sequence)
-            self.demo_seed = 12345
+            self.demo_seed = 54321
             self.teaching_seed = 54321
 
         # Trajectory recording variables for gym format
@@ -161,34 +160,31 @@ class RobotTeachingApp:
         self.sim_frame.pack(pady=(0, 10), padx=20, fill=tk.BOTH, expand=True)
         self.sim_frame.pack_propagate(False)
         
-        part_name = "TEACH the robot how to drive" if IS_TEACHING_EXPERIMENT else "perform a normal drive"
-        self.sim_placeholder = create_label(self.sim_frame, "Please "+part_name+".\n\nClick 'Start Experiment' to begin Part 1", 14)
+        part_name = "wait for further instructions, when ready," if IS_TEACHING_EXPERIMENT else "wait for further instructions, when ready,"
+        self.sim_placeholder = create_label(self.sim_frame, "Please "+part_name+"\n\nClick 'Start Experiment' to begin Part 1", 14)
         self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
         
-        self.status_label = Label(main_frame, text="Ready to begin experiment", bg=main_color, fg="white", font=('Arial', 12))
+        self.status_label = Label(main_frame, text="...", bg=main_color, fg="white", font=('Arial', 12))
         self.status_label.pack(pady=(5, 0))
 
         button_frame = Frame(main_frame, bg=main_color)
         button_frame.pack(pady=15)
         self.buttons = {}
         btn_configs = {
-            "Start": {"bg": "#4CAF50", "cmd": self.start_experiment},
-            "Next": {"bg": "#2196F3", "cmd": self.next_phase, "state": tk.DISABLED},
-            "Continue": {"bg": "#FF9800", "cmd": self.continue_to_part2, "state": tk.DISABLED},
+            "Start Experiment": {"bg": "#4CAF50", "cmd": self.start_experiment},
+            "Begin Part 2": {"bg": "#FF9800", "cmd": self.continue_to_part2, "state": tk.DISABLED},
             "Stop": {"bg": "#F44336", "cmd": self.stop_simulation, "state": tk.DISABLED}
         }
         for name, config in btn_configs.items():
-            text = f"{name} Phase" if name in ["Start", "Next"] else ("Begin Part 2" if name == "Continue" else name)
-            btn = Button(button_frame, text=text, font=("Arial", 14, "bold"),
+            btn = Button(button_frame, text=name, font=("Arial", 14, "bold"),
                          fg="white", bg=config["bg"], padx=25, pady=12, relief=tk.RAISED,
                          borderwidth=3, command=config["cmd"], state=config.get("state", tk.NORMAL))
             btn.pack(side=tk.LEFT, padx=8)
             self.buttons[name.lower()] = btn
 
     def update_ui_state(self, is_running, part1_complete=False):
-        self.buttons["start"].config(state=tk.DISABLED if is_running else tk.NORMAL, bg="#CCCCCC" if is_running else "#4CAF50")
-        self.buttons["next"].config(state=tk.NORMAL if is_running else tk.DISABLED, bg="#2196F3" if is_running else "#CCCCCC")
-        self.buttons["continue"].config(state=tk.NORMAL if part1_complete else tk.DISABLED, bg="#FF9800" if part1_complete else "#CCCCCC")
+        self.buttons["start experiment"].config(state=tk.DISABLED if is_running else tk.NORMAL, bg="#CCCCCC" if is_running else "#4CAF50")
+        self.buttons["begin part 2"].config(state=tk.NORMAL if part1_complete else tk.DISABLED, bg="#FF9800" if part1_complete else "#CCCCCC")
         self.buttons["stop"].config(state=tk.NORMAL if is_running else tk.DISABLED, bg="#F44336" if is_running else "#CCCCCC")
         if is_running: 
             self.sim_placeholder.place_forget()
@@ -199,7 +195,7 @@ class RobotTeachingApp:
         self.running = True
         self.current_iteration = 1
         self.update_ui_state(is_running=True)
-        self.status_label.config(text="Starting experiment...")
+        self.status_label.config(text="...")
         policy_type = self.phase_sequence[0]
         self.run_demonstration(policy_type)
 
@@ -228,8 +224,8 @@ class RobotTeachingApp:
             self.env = None
         self.part1_complete = True
         self.update_ui_state(is_running=False, part1_complete=True)
-        part_name = "TEACH the robot how to drive" if not IS_TEACHING_EXPERIMENT else "perform a normal drive"
-        self.sim_placeholder.config(text="Now please "+part_name+".\n\n Click 'Begin Part 2'", font=("Arial", 18, "bold"))
+        part_name = "wait for further instructions, when ready," if not IS_TEACHING_EXPERIMENT else "wait for further instructions, when ready,"
+        self.sim_placeholder.config(text="Now please "+part_name+"\n\n Click 'Begin Part 2'", font=("Arial", 18, "bold"))
 
     def continue_to_part2(self):
         self.current_part = 2
@@ -252,8 +248,8 @@ class RobotTeachingApp:
             self.env = None
         self.update_ui_state(is_running=False)
         if not completed:
-            part_name = "perform a normal drive" if IS_TEACHING_EXPERIMENT else "teach the robot how to drive"
-            self.sim_placeholder.config(text="Please "+part_name+".\n\nClick 'Start Experiment' to begin")
+            part_name = "wait for further instructions, when ready," if IS_TEACHING_EXPERIMENT else "wait for further instructions, when ready,"
+            self.sim_placeholder.config(text="Please "+part_name+"\n\nClick 'Start Experiment' to begin")
 
     def get_key_states(self):
         """Capture current key states using MetaDrive's native InputState"""

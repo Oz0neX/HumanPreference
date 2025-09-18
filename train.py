@@ -83,17 +83,6 @@ def create_policy():
         net_arch=[32, 64, 32, 6], lr_schedule=lambda _: 3e-4
     )
 
-#KL Divergence stuff
-# def calculate_distribution(bc_tv_dict, random_tv_dict):
-#     bc_tvs = np.array(list(bc_tv_dict.values()))
-#     rand_tvs = np.array(list(random_tv_dict.values()))
-#     sum_exp_bc = np.sum(np.exp(bc_tvs))
-#     sum_exp_rand = np.sum(np.exp(rand_tvs))
-#     denominator = sum_exp_bc + sum_exp_rand
-#     raw_likelihoods = np.exp(bc_tvs) / denominator
-#     final_dist = raw_likelihoods / np.sum(raw_likelihoods)
-#     return final_dist
-
 def calculate_tv_likelihood(bc_tv_dict, random_tv_dict):
     bc_tvs = np.array(list(bc_tv_dict.values()))
     bc_tvs = -bc_tvs
@@ -108,12 +97,12 @@ def calculate_tv_likelihood(bc_tv_dict, random_tv_dict):
         p_i = exp_bc_tv / (exp_bc_tv + sum_exp_random_tv)
         likelihoods.append(p_i)
     
-    print(likelihoods)
     result = 0
     for v in likelihoods:
-        result *= v
+        result += v
         if result == 0: result = v
 
+    result /= len(likelihoods)
     return result
 
 optimal_model = bc.BC(
@@ -146,33 +135,6 @@ tv_teach_on_teach = teaching_model.calculate_teaching_volume(eval_grad_norm_teac
 tv_teach_on_opt = teaching_model.calculate_teaching_volume(eval_grad_norm_teach, optimal_demos)
 
 results = {}
-
-#KL Divergence stuff
-# Data format tv_type_on_type[0, 1, 2, 3]
-# tv_type_on_type[0]: BC Timestep TV
-# tv_type_on_type[1]: BC Trajectory TV
-# tv_type_on_type[2]: Random Timestep TV
-# tv_type_on_type[3]: Random Trajectory TV
-
-# By timestep
-# dist_opt_on_opt_ts = calculate_distribution(tv_opt_on_opt[0], tv_opt_on_opt[2])
-# dist_opt_on_teach_ts = calculate_distribution(tv_opt_on_teach[0], tv_opt_on_teach[2])
-# results['kl_opt_model_timestep'] = entropy(dist_opt_on_opt_ts, dist_opt_on_teach_ts)
-
-# dist_teach_on_teach_ts = calculate_distribution(tv_teach_on_teach[0], tv_teach_on_teach[2])
-# dist_teach_on_opt_ts = calculate_distribution(tv_teach_on_opt[0], tv_teach_on_opt[2])
-# results['kl_teach_model_timestep'] = entropy(dist_teach_on_teach_ts, dist_teach_on_opt_ts)
-
-# # By trajectory
-# dist_opt_on_opt_tj = calculate_distribution(tv_opt_on_opt[1], tv_opt_on_opt[3])
-# dist_opt_on_teach_tj = calculate_distribution(tv_opt_on_teach[1], tv_opt_on_teach[3])
-# results['kl_opt_model_trajectory'] = entropy(dist_opt_on_opt_tj, dist_opt_on_teach_tj)
-
-# dist_teach_on_teach_tj = calculate_distribution(tv_teach_on_teach[1], tv_teach_on_teach[3])
-# dist_teach_on_opt_tj = calculate_distribution(tv_teach_on_opt[1], tv_teach_on_opt[3])
-# results['kl_teach_model_trajectory'] = entropy(dist_teach_on_teach_tj, dist_teach_on_opt_tj)
-
-results = {}
 results['tv_likelihood_timestep'] = {
     'opt_on_opt': calculate_tv_likelihood(tv_opt_on_opt[0], tv_opt_on_opt[2]),
     'opt_on_teach': calculate_tv_likelihood(tv_opt_on_teach[0], tv_opt_on_teach[2]),
@@ -195,25 +157,9 @@ results['direct_log_likelihood'] = {
 print("\n## TV-based prob by timestep ##")
 for key, val in results['tv_likelihood_timestep'].items():
     print(f"{key:<15}: {val:.8f}")
-
-# print("\n## TV-based Log-Likelihood (Trajectory TV) ##")
-# for key, val in results['tv_likelihood_trajectory'].items():
-#     print(f"{key:<15}: {val}")
     
 print("\n## Log-Likelihood based on model logits ##")
 for key, val in results['direct_log_likelihood'].items():
     print(f"{key:<15}: {val:.3f}")
 
 print("\n" + "="*60)
-
-#KL Divergence stuff
-# print("\n" + "="*50)
-# print(" " * 15 + "KL DIVERGENCE RESULTS")
-# print("="*50)
-# print("\n## Timestep Divergence ##")
-# print(f"Optimal Model KL: {results['kl_opt_model_timestep']:.5f}")
-# print(f"Teaching Model KL: {results['kl_teach_model_timestep']:.5f}")
-# print("\n## Trajectory Divergence ##")
-# print(f"Optimal Model KL: {results['kl_opt_model_trajectory']:.5f}")
-# print(f"Teaching Model KL: {results['kl_teach_model_trajectory']:.5f}")
-# print("\n" + "="*50)
