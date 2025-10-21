@@ -114,9 +114,9 @@ class RobotTeachingApp:
         optimal_sequence = ["human_demo"] * NUM_OPTIMAL
 
         # Generate teaching phase sequence: agent-human alternating for NUM_TEACHING cycles
-        teaching_sequence = []
+        teaching_sequence = ["noisy_expert"]
         for i in range(NUM_TEACHING):
-            teaching_sequence.extend(["noisy_expert", "human"])
+            teaching_sequence.extend(["human"])
 
         # Combine: optimal first, then teaching (same order regardless of experiment type)
         self.phase_sequence = optimal_sequence + teaching_sequence
