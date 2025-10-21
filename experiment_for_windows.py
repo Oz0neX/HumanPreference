@@ -9,15 +9,28 @@ from metadrive.examples.ppo_expert.numpy_expert import expert
 
 from imitation.data import types
 from imitation.data import serialize
-
+import sys
 
 IS_TEACHING_EXPERIMENT = True
-NUM_TEACHING = 1
+NUM_TEACHING = 2
 NUM_OPTIMAL = 1
 
 # Discrete action configuration
 DISCRETE_STEERING_DIM = 5
 DISCRETE_THROTTLE_DIM = 5
+
+class ContinuousReplayPolicy:
+    """Continuous replay policy - exact copy from replay_record.py"""
+    def __init__(self, trajectory):
+        self.trajectory = trajectory
+        self.step = 0
+
+    def act(self):
+        if self.step >= len(self.trajectory.acts):
+            return [0.0, 0.0]
+        action = self.trajectory.acts[self.step]
+        self.step += 1
+        return action
 
 def get_discrete_action_values(steering_dim=DISCRETE_STEERING_DIM, throttle_dim=DISCRETE_THROTTLE_DIM):
     steering_unit = 2.0 / (steering_dim - 1)
@@ -39,6 +52,10 @@ def continuous_to_discrete_action(continuous_action, steering_values, throttle_v
 
 main_color = '#3e3e42'
 secondary_color = '#252526'
+
+# Check for --linux flag to enable embedded windows
+USE_EMBEDDED_WINDOWS = "--linux" in sys.argv
+print(f"Embedded windows mode: {USE_EMBEDDED_WINDOWS}")
 
 class NoisyExpertPolicy:
     def __init__(self, vehicle):
@@ -82,42 +99,44 @@ class RobotTeachingApp:
         self.center_window()
 
         self.current_iteration = 0
+        self.teaching_counter = 0  # Separate counter for teaching trajectories (1, 2, 3...)
+        self.part2_local_iter = 0  # Local iteration counter for Part 2
+        self.part3_local_iter = 0  # Local iteration counter for Part 3
         self.env = None
         self.policy = None
         self.running = False
         self.current_part = 1
         self.part1_complete = False
+        self.part2_complete = False  # Track completion of Part 2
         
+        # Always put optimal first, regardless of IS_TEACHING_EXPERIMENT
+        # Generate optimal phase sequence: human_demo for NUM_OPTIMAL times
+        optimal_sequence = ["human_demo"] * NUM_OPTIMAL
+
+        # Generate teaching phase sequence: agent-human alternating for NUM_TEACHING cycles
+        teaching_sequence = []
+        for i in range(NUM_TEACHING):
+            teaching_sequence.extend(["noisy_expert", "human"])
+
+        # Combine: optimal first, then teaching (same order regardless of experiment type)
+        self.phase_sequence = optimal_sequence + teaching_sequence
+        self.total_iterations = len(self.phase_sequence)
+
+        # Part 1 is optimal demonstrations (first iterations)
+        self.part1_iterations = len(optimal_sequence)
+        # Part 2 is teaching demonstrations (next set of iterations)
+        self.part2_iterations = len(teaching_sequence)
+        # Part 3 is additional teaching demonstrations on opposite map (final set)
+        self.part3_iterations = len(teaching_sequence)
+
+        # Separate phase sequences for Parts 2 and 3 (same as teaching_sequence)
+        self.part2_phase_sequence = teaching_sequence
+        self.part3_phase_sequence = teaching_sequence
+
         if IS_TEACHING_EXPERIMENT:
-            # Generate teaching phase sequence: agent-human alternating for NUM_TEACHING cycles
-            teaching_sequence = []
-            for i in range(NUM_TEACHING):
-                teaching_sequence.extend(["noisy_expert", "human"])
-            
-            # Generate optimal phase sequence: human_demo for NUM_OPTIMAL times
-            optimal_sequence = ["human_demo"] * NUM_OPTIMAL
-            
-            # Combine: teaching first, then optimal
-            self.phase_sequence = optimal_sequence + teaching_sequence
-            self.total_iterations = len(self.phase_sequence)
-            self.part1_iterations = len(teaching_sequence)
-            self.part2_iterations = len(optimal_sequence)
-            self.teaching_seed = 12345
+            self.teaching_seed = 12345  # Different seed for teaching vs demo
             self.demo_seed = 12345
         else:
-            # Generate optimal phase sequence: human_demo for NUM_OPTIMAL times
-            optimal_sequence = ["human_demo"] * NUM_OPTIMAL
-            
-            # Generate teaching phase sequence: agent-human alternating for NUM_TEACHING cycles
-            teaching_sequence = []
-            for i in range(NUM_TEACHING):
-                teaching_sequence.extend(["noisy_expert", "human"])
-            
-            # Combine: optimal first, then teaching
-            self.phase_sequence = optimal_sequence + teaching_sequence
-            self.total_iterations = len(self.phase_sequence)
-            self.part1_iterations = len(optimal_sequence)
-            self.part2_iterations = len(teaching_sequence)
             self.demo_seed = 54321
             self.teaching_seed = 54321
 
@@ -173,6 +192,7 @@ class RobotTeachingApp:
         btn_configs = {
             "Start Experiment": {"bg": "#4CAF50", "cmd": self.start_experiment},
             "Begin Part 2": {"bg": "#FF9800", "cmd": self.continue_to_part2, "state": tk.DISABLED},
+            "Begin Part 3": {"bg": "#9C27B0", "cmd": self.continue_to_part3, "state": tk.DISABLED},
             "Stop": {"bg": "#F44336", "cmd": self.stop_simulation, "state": tk.DISABLED}
         }
         for name, config in btn_configs.items():
@@ -182,13 +202,14 @@ class RobotTeachingApp:
             btn.pack(side=tk.LEFT, padx=8)
             self.buttons[name.lower()] = btn
 
-    def update_ui_state(self, is_running, part1_complete=False):
+    def update_ui_state(self, is_running, part1_complete=False, part2_complete=False):
         self.buttons["start experiment"].config(state=tk.DISABLED if is_running else tk.NORMAL, bg="#CCCCCC" if is_running else "#4CAF50")
         self.buttons["begin part 2"].config(state=tk.NORMAL if part1_complete else tk.DISABLED, bg="#FF9800" if part1_complete else "#CCCCCC")
+        self.buttons["begin part 3"].config(state=tk.NORMAL if part2_complete else tk.DISABLED, bg="#9C27B0" if part2_complete else "#CCCCCC")
         self.buttons["stop"].config(state=tk.NORMAL if is_running else tk.DISABLED, bg="#F44336" if is_running else "#CCCCCC")
-        if is_running: 
+        if is_running:
             self.sim_placeholder.place_forget()
-        else: 
+        else:
             self.sim_placeholder.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
     def start_experiment(self):
@@ -204,17 +225,31 @@ class RobotTeachingApp:
         if self.recording_started and len(self.current_episode_obs) > 0 and not self.trajectory_saved:
             self.save_trajectory()
             self.trajectory_saved = True
-        
+
         if self.current_part == 1 and self.current_iteration >= self.part1_iterations:
             self.complete_part1()
             return
-        
-        if self.current_part == 2 and (self.current_iteration - self.part1_iterations) >= self.part2_iterations:
+
+        if self.current_part == 2 and self.part2_local_iter >= self.part2_iterations:
+            self.complete_part2()
+            return
+
+        if self.current_part == 3 and self.part3_local_iter >= self.part3_iterations:
             self.stop_simulation(completed=True)
             return
-        
-        self.current_iteration += 1
-        policy_type = self.phase_sequence[self.current_iteration - 1]
+
+        # Increment local iteration and get next policy type for current part
+        if self.current_part == 2:
+            self.part2_local_iter += 1
+            policy_type = self.part2_phase_sequence[self.part2_local_iter - 1]
+        elif self.current_part == 3:
+            self.part3_local_iter += 1
+            policy_type = self.part3_phase_sequence[self.part3_local_iter - 1]
+        else:
+            # Part 1 uses global counter
+            self.current_iteration += 1
+            policy_type = self.phase_sequence[self.current_iteration - 1]
+
         self.run_demonstration(policy_type)
 
     def complete_part1(self):
@@ -227,14 +262,36 @@ class RobotTeachingApp:
         part_name = "wait for further instructions, when ready," if not IS_TEACHING_EXPERIMENT else "wait for further instructions, when ready,"
         self.sim_placeholder.config(text="Now please "+part_name+"\n\n Click 'Begin Part 2'", font=("Arial", 18, "bold"))
 
+    def complete_part2(self):
+        self.running = False
+        if self.env:
+            self.env.close()
+            self.env = None
+        self.part2_complete = True
+        self.update_ui_state(is_running=False, part1_complete=True, part2_complete=True)
+        part_name = "wait for further instructions, when ready," if not IS_TEACHING_EXPERIMENT else "wait for further instructions, when ready,"
+        self.sim_placeholder.config(text="Now please "+part_name+"\n\n Click 'Begin Part 3'", font=("Arial", 18, "bold"))
+
     def continue_to_part2(self):
         self.current_part = 2
-        self.current_iteration = self.part1_iterations + 1
+        self.part2_local_iter = 1
+        self.teaching_counter = 0  # Reset teaching counter for part 2 (teaching trajectories start from 1)
         self.running = True
         self.part1_complete = False
         self.update_ui_state(is_running=True)
-        
-        policy_type = self.phase_sequence[self.current_iteration - 1]
+
+        policy_type = self.part2_phase_sequence[self.part2_local_iter - 1]
+        self.run_demonstration(policy_type)
+
+    def continue_to_part3(self):
+        self.current_part = 3
+        self.part3_local_iter = 1
+        self.teaching_counter = 0  # Reset teaching counter for part 3 (teaching trajectories start from 1)
+        self.running = True
+        self.part2_complete = False
+        self.update_ui_state(is_running=True)
+
+        policy_type = self.part3_phase_sequence[self.part3_local_iter - 1]
         self.run_demonstration(policy_type)
 
     def stop_simulation(self, completed=False):
@@ -297,38 +354,89 @@ class RobotTeachingApp:
                 self.env = None
             
             if IS_TEACHING_EXPERIMENT:
-                seed = self.teaching_seed if self.current_iteration <= self.part1_iterations else self.demo_seed
+                if self.current_part == 3:
+                    seed = 54321  # Opposite seed for Part 3
+                else:
+                    seed = self.teaching_seed if self.current_iteration <= self.part1_iterations else self.demo_seed
             else:
-                seed = self.demo_seed if self.current_iteration <= self.part1_iterations else self.teaching_seed
+                if self.current_part == 3:
+                    seed = 12345  # Opposite seed for Part 3 (when not teaching experiment)
+                else:
+                    seed = self.demo_seed if self.current_iteration <= self.part1_iterations else self.teaching_seed
             
             is_manual = policy_type in ["human", "human_demo"]
-            
-            config = {
-                "map": "SCS", 
-                "traffic_density": 0.1, 
-                "num_scenarios": 1, 
-                "start_seed": seed,
-                "manual_control": is_manual, 
-                "use_render": True, 
-                "window_size": (800, 600),
-                "multi_thread_render": False,
-                "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
-                "on_continuous_line_done": False,
-                "out_of_route_done": False,
-                "crash_vehicle_done": False,
-                "crash_object_done": False,
-                "discrete_action": True,
-                "discrete_steering_dim": DISCRETE_STEERING_DIM,
-                "discrete_throttle_dim": DISCRETE_THROTTLE_DIM,
-                "use_multi_discrete": True
-            }
-            
+
+            if USE_EMBEDDED_WINDOWS:
+                # Use embedded windows for Linux compatibility
+                # Get the size of the simulation frame for embedding
+                self.root.update_idletasks()
+                frame_width = self.sim_frame.winfo_width() - 6  # Account for border
+                frame_height = self.sim_frame.winfo_height() - 6
+
+                config = {
+                    "map": "SCS",
+                    "traffic_density": 0.1,
+                    "num_scenarios": 1,
+                    "start_seed": seed,
+                    "manual_control": is_manual,
+                    "use_render": True,
+                    "window_size": (frame_width, frame_height),
+                    "parent_window": self.sim_frame.winfo_id(),  # Embed in the sim_frame
+                    "vehicle_config": {"show_navi_mark": True, "show_line_to_navi_mark": True},
+                    # Termination conditions - disable collision-based endings
+                    "on_continuous_line_done": False,
+                    "out_of_route_done": False,
+                    "crash_vehicle_done": False,
+                    "crash_object_done": False,
+                    "discrete_action": True,
+                    "discrete_steering_dim": DISCRETE_STEERING_DIM,
+                    "discrete_throttle_dim": DISCRETE_THROTTLE_DIM,
+                    "use_multi_discrete": True
+                }
+            else:
+                # Use separate windows (default Windows behavior)
+                config = {
+                    "map": "SCS",
+                    "traffic_density": 0.1,
+                    "num_scenarios": 1,
+                    "start_seed": seed,
+                    "manual_control": is_manual,
+                    "use_render": True,
+                    "window_size": (800, 600),
+                    "multi_thread_render": False,
+                    "vehicle_config": {"show_navi_mark": False, "show_line_to_navi_mark": True},
+                    # Termination conditions - disable collision-based endings to allow continued driving
+                    "on_continuous_line_done": False,
+                    "out_of_route_done": False,
+                    "crash_vehicle_done": False,
+                    "crash_object_done": False,
+                    "discrete_action": True,
+                    "discrete_steering_dim": DISCRETE_STEERING_DIM,
+                    "discrete_throttle_dim": DISCRETE_THROTTLE_DIM,
+                    "use_multi_discrete": True
+                }
+
             self.env = MetaDriveEnv(config)
             obs = self.env.reset()[0]
 
-        if policy_type == "noisy_expert": 
-            self.policy = NoisyExpertPolicy(self.env.agent)
-        else: 
+        if policy_type == "noisy_expert":
+            # Use EXACT continuous replay from replay_record.py - separate environment
+            trajectory_path = self.get_trajectory_path_for_iteration()
+            if trajectory_path:
+                print(f"Starting continuous trajectory replay...")
+                # Close existing environment first to avoid engine conflicts
+                if self.env:
+                    self.env.close()
+                    self.env = None
+                # Perform continuous replay using EXACT code from replay_record.py
+                self.perform_continuous_replay(trajectory_path)
+                # After continuous replay, move to next phase
+                self.root.after(2000, self.next_phase)  # Give time for auto-close message
+                return
+            else:
+                print("No trajectory found, falling back to NoisyExpertPolicy")
+                self.policy = NoisyExpertPolicy(self.env.agent)
+        else:
             self.policy = None
         
         self.simulation_loop()
@@ -373,9 +481,15 @@ class RobotTeachingApp:
                     self.current_episode_acts.append(discrete_action)
                     self.current_episode_infos.append({})
             
-            if terminated or truncated: 
+            # Check for trajectory replay completion
+            if hasattr(self.policy, 'is_trajectory_complete') and self.policy.is_trajectory_complete():
+                print("Trajectory replay complete, auto-closing experiment...")
+                self.root.after(1000, lambda: self.root.destroy())  # Close after 1 second delay
+                return
+
+            if terminated or truncated:
                 self.root.after(500, self.next_phase)
-            else: 
+            else:
                 self.root.after(20, self.simulation_loop)
         except Exception as e:
             print(f"Error in simulation loop: {e}")
@@ -436,7 +550,105 @@ class RobotTeachingApp:
         except Exception as e:
             print(f"Error saving trajectory: {e}")
 
-if __name__ == "__main__": 
+    def perform_continuous_replay(self, trajectory_path):
+        """Perform continuous replay using EXACT code from replay_record.py"""
+        print(f"Performing continuous replay of: {trajectory_path}")
+
+        # Use EXACT config from replay_record.py (continuous replay mode)
+        config = {
+            "map": "SCS",
+            "traffic_density": 0.1,
+            "start_seed": 12345,  # Use fixed seed for replay consistency
+            "manual_control": False,  # False for replay
+            "use_render": True,
+            "vehicle_config": {"show_navi_mark": False},
+            "discrete_action": False,      # CONTINUOUS actions
+            "use_multi_discrete": False,   # CONTINUOUS actions
+            "on_continuous_line_done": False,
+            "out_of_route_done": False,
+            "crash_vehicle_done": False,
+            "crash_object_done": False,
+        }
+
+        # Load the saved trajectory - EXACT same code from replay_record.py
+        trajectories = serialize.load(trajectory_path)
+        trajectory = trajectories[0]
+        print(f"Loaded trajectory with {len(trajectory.obs)} observations and {len(trajectory.acts)} actions")
+
+        print("Starting continuous replay phase...")
+
+        # Create continuous environment for replay
+        env = MetaDriveEnv(config)
+        obs, info = env.reset()
+
+        # Use EXACT ContinuousReplayPolicy from replay_record.py
+        policy = ContinuousReplayPolicy(trajectory)
+
+        print("Replaying trajectory... Close window when done or wait for auto-close.")
+
+        while True:
+            action = policy.act()
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            # Check if trajectory is complete
+            if policy.step >= len(trajectory.acts):
+                print("Continuous trajectory replay complete, auto-closing...")
+                env.close()
+                return True  # Signal completion
+
+            if terminated or truncated:
+                break
+
+        env.close()
+        print("Continuous replay ended due to termination")
+        return False
+
+    def get_trajectory_path_for_iteration(self):
+        """Get the trajectory path for current iteration using the replay_record.py saved trajectories"""
+        # Increment teaching counter for each teaching trajectory request
+        self.teaching_counter += 1
+
+        # Look in the 'recorded' directory where replay_record.py saves trajectories
+        recorded_dir = "recorded"
+
+        if not os.path.exists(recorded_dir):
+            print(f"Recorded directory not found: {recorded_dir}")
+            return None
+
+        # First, try to find trajectory with expected naming pattern: {counter}_{seed}_trajectory
+        if IS_TEACHING_EXPERIMENT:
+            current_seed = self.teaching_seed if self.current_part == 2 else 54321  # Use teaching seed for Part 2, opposite seed for Part 3
+        else:
+            current_seed = 54321  # base seed for opposite calculation
+        expected_pattern = f"{self.teaching_counter}_{current_seed}_trajectory"
+
+        expected_path = os.path.join(recorded_dir, expected_pattern)
+        if os.path.exists(expected_path):
+            print(f"Found expected trajectory: {expected_path}")
+            return expected_path
+
+        # Fallback: find the most recent trajectory if expected pattern not found
+        all_items = []
+        for item in os.listdir(recorded_dir):
+            item_path = os.path.join(recorded_dir, item)
+            if os.path.isdir(item_path):
+                all_items.append(item)
+
+        if not all_items:
+            print(f"No trajectory directories found in: {recorded_dir}")
+            return None
+
+        # Sort by modification time (most recent first)
+        all_items.sort(key=lambda x: os.path.getmtime(os.path.join(recorded_dir, x)), reverse=True)
+        selected_dir = all_items[0]
+
+        trajectory_path = os.path.join(recorded_dir, selected_dir)
+        print(f"Expected trajectory {expected_pattern} not found, using most recent: {trajectory_path}")
+
+        return trajectory_path
+
+
+if __name__ == "__main__":
     root = tk.Tk()
     app = RobotTeachingApp(root)
     root.mainloop()
