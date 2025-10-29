@@ -8,9 +8,9 @@
           "dtype": "float32",
           "_type": "Value"
         },
-        "_type": "List"
+        "_type": "Sequence"
       },
-      "_type": "List"
+      "_type": "Sequence"
     },
     "acts": {
       "feature": {
@@ -18,16 +18,16 @@
           "dtype": "float32",
           "_type": "Value"
         },
-        "_type": "List"
+        "_type": "Sequence"
       },
-      "_type": "List"
+      "_type": "Sequence"
     },
     "infos": {
       "feature": {
         "dtype": "string",
         "_type": "Value"
       },
-      "_type": "List"
+      "_type": "Sequence"
     },
     "terminal": {
       "dtype": "bool",

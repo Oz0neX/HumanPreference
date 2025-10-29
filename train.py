@@ -44,6 +44,7 @@ if not maps_data:
     sys.exit(1)
 
 map_name = list(maps_data.keys())[0]
+print(f"For map: {map_name}")
 trajectories_dict = maps_data[map_name]
 seed = int(map_name.split('_')[1])
 
@@ -154,11 +155,13 @@ results['direct_log_likelihood'] = {
     'teach_on_opt': tv_teach_on_opt[4],
 }
 
-print("\n## TV-based prob by timestep ##")
+print("\nTeaching Score probabilities")
+print("-"*30)
 for key, val in results['tv_likelihood_timestep'].items():
     print(f"{key:<15}: {val:.8f}")
     
-print("\n## Log-Likelihood based on model logits ##")
+print("\nLog-Likelihood")
+print("-"*30)
 for key, val in results['direct_log_likelihood'].items():
     print(f"{key:<15}: {val:.3f}")
 
